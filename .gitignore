@@ -1,0 +1,64 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtualenv
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment (NEVER commit real secrets)
+.env
+.env.local
+.env.production
+
+# Test coverage
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+.nox/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# mypy / ruff
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Supabase / DB
+.supabase/
+
+# Local dev
+*.db
+*.sqlite
+
+# Jupyter
+.ipynb_checkpoints/
+
+# uvicorn
+*.pid
+
+# Secrets (never commit these)
+*.pem
+*.key
+credentials.json
+service_account.json
