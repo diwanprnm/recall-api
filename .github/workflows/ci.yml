@@ -24,7 +24,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --all-extras
 
       - name: Run tests
         run: uv run pytest tests/ -v --tb=short
@@ -51,8 +51,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Install deps (no extras)
-        run: uv sync
+      - name: Install deps (including dev)
+        run: uv sync --all-extras
 
       - name: Lint with ruff
         run: uv run ruff check app/ --output-format=github
