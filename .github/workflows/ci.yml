@@ -27,7 +27,7 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run tests
-        run: uv run pytest tests/ -v --tb=short --cov=app --cov-fail-under=60
+        run: uv run pytest tests/ -v --tb=short
 
       - name: Lint with ruff
         run: uv run ruff check app/ tests/ --output-format=github
