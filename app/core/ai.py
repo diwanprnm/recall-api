@@ -9,19 +9,20 @@ Key principle from IDEATION-CANVAS: ONE LLM call does everything:
 """
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
+import httpx
 import instructor
+import structlog
 from openai import AsyncOpenAI, OpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
 
 if TYPE_CHECKING:
-    from openai._models import FinalResponseType
+    pass
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ── Module-level singletons ────────────────────────────────────────────────────
 
@@ -80,7 +81,6 @@ def get_sync_instructor() -> instructor.Instructor:
 
 def _is_transient_error(exc: Exception) -> bool:
     """Returns True if the exception is a transient error worth retrying."""
-    import httpx
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code in {429, 500, 502, 503, 504}
     if isinstance(exc, httpx.TimeoutException):

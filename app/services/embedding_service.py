@@ -9,10 +9,9 @@ Uses text-embedding-3-small (1536 dimensions, $0.00002/1K tokens).
 """
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
-import instructor
+import structlog
 from openai import AsyncOpenAI
 
 from app.core.config import get_settings
@@ -20,7 +19,7 @@ from app.core.config import get_settings
 if TYPE_CHECKING:
     from app.schemas.schemas import ContentAnalysis
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ── Prompt templates for enriched embeddings ─────────────────────────────────
 

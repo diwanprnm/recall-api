@@ -4,8 +4,8 @@ Application settings — loaded from environment variables.
 Uses Pydantic Settings v2 with dotenv support.
 All values are validated at startup (fails fast on misconfiguration).
 """
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):

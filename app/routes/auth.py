@@ -11,15 +11,15 @@ Design:
 """
 from __future__ import annotations
 
-import logging
 from typing import Annotated
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from app.core.supabase import get_supabase_client, supabase_session
+from app.core.supabase import supabase_session
 from app.schemas.schemas import ApiResponse, UserProfile
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
@@ -58,7 +58,7 @@ async def get_profile(auth: AuthDep) -> UserProfile:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired token",
                 headers={"WWW-Authenticate": "Bearer"},
-            )
+            ) from exc
 
         if not user or not user.user:
             raise HTTPException(
@@ -89,7 +89,7 @@ async def verify_token(auth: AuthDep) -> ApiResponse:
         try:
             await sb.auth.get_user()
         except Exception:
-            raise HTTPException(status_code=401, detail="Token invalid or expired")
+            raise HTTPException(status_code=401, detail="Token invalid or expired") from None
     return ApiResponse(success=True, message="Token is valid")
 
 
@@ -111,7 +111,6 @@ async def auth_webhook(request: Request) -> ApiResponse:
       - user.confirmed → create UserProfile in our extensions table
       - user.deleted   → cascade delete user's data (GDPR)
     """
-    import json
     body = await request.json()
     event_type = body.get("type", "unknown")
     logger.info("Auth webhook received", event=event_type)

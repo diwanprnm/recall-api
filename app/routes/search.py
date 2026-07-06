@@ -9,15 +9,15 @@ Key design decisions:
 """
 from __future__ import annotations
 
-import logging
 import time
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.supabase import supabase_session
-from app.schemas.schemas import Item, Platform, SearchQuery, SearchResponse, SearchResult
+from app.schemas.schemas import Item, SearchQuery, SearchResponse, SearchResult
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/search", tags=["search"])
 
 
@@ -79,7 +79,7 @@ async def semantic_search(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Embedding service temporarily unavailable",
-        )
+        ) from None
 
     # ── Step 2: pgvector search via Supabase RPC ─────────────────────────────
     # We use an RPC function for the vector search to keep SQL out of the app.
@@ -102,7 +102,7 @@ async def semantic_search(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Search service temporarily unavailable",
-            )
+            ) from None
 
         # ── Step 3: Build response ───────────────────────────────────────────
         results: list[SearchResult] = []

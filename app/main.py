@@ -10,7 +10,6 @@ Architecture:
 """
 from __future__ import annotations
 
-import logging
 from contextlib import asynccontextmanager
 
 import structlog
@@ -29,8 +28,8 @@ logger = structlog.get_logger()
 
 # ── Global service singletons (initialised on startup) ────────────────────────
 
-_ai_service: "app.services.ai_service.AIService | None" = None
-_embedding_service: "app.services.embedding_service.EmbeddingService | None" = None
+_ai_service: app.services.ai_service.AIService | None = None
+_embedding_service: app.services.embedding_service.EmbeddingService | None = None
 
 
 def get_ai_service():
@@ -64,7 +63,7 @@ async def lifespan(app: FastAPI):
 
     # ── Initialise Supabase client ─────────────────────────────────────────────
     try:
-        sb = get_supabase_client()
+        get_supabase_client()
         logger.info("Supabase client ready", url=cfg.supabase_url)
     except Exception as exc:
         logger.error("Failed to init Supabase client", error=str(exc))
@@ -72,8 +71,8 @@ async def lifespan(app: FastAPI):
 
     # ── Initialise AI services ────────────────────────────────────────────────
     from app.core.ai import get_async_instructor
-    from app.services.embedding_service import EmbeddingService
     from app.services.ai_service import AIService
+    from app.services.embedding_service import EmbeddingService
 
     global _ai_service, _embedding_service
     try:
@@ -156,8 +155,9 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
     async def readiness_check():
         """Full readiness: checks Supabase connectivity."""
         try:
-            sb = get_supabase_client()
-            await sb.table("_prisma_migrations").select("id").limit(1).execute()
+            from app.core.supabase import get_supabase_client
+            client = get_supabase_client()
+            await client.table("_prisma_migrations").select("id").limit(1).execute()
             return {"status": "ready", "database": "connected"}
         except Exception as exc:
             logger.error("Readiness check failed", error=str(exc))

@@ -10,25 +10,21 @@ from the enriched text for semantic search.
 """
 from __future__ import annotations
 
-import logging
 import time
 from typing import TYPE_CHECKING
 
 import instructor
-from openai import AsyncOpenAI
+import structlog
 
 from app.core.config import get_settings
 from app.schemas.schemas import (
     ContentAnalysis,
-    ContentClassification,
-    ContentSummary,
-    ExtractedEntities,
 )
 
 if TYPE_CHECKING:
     from app.services.embedding_service import EmbeddingService
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ── Single-call analysis prompt ───────────────────────────────────────────────
 

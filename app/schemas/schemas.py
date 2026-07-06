@@ -11,15 +11,14 @@ Key design decisions:
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
-
 # ── Enums ──────────────────────────────────────────────────────────────────────
 
-class Platform(str, Enum):
+class Platform(StrEnum):
     """Supported social media platforms."""
     TWITTER = "twitter"
     INSTAGRAM = "instagram"
@@ -52,7 +51,7 @@ class Platform(str, Enum):
         return cls.WEB
 
 
-class ContentType(str, Enum):
+class ContentType(StrEnum):
     """What kind of content is this?"""
     POST = "post"
     THREAD = "thread"       # Twitter/X thread
@@ -65,7 +64,7 @@ class ContentType(str, Enum):
     UNKNOWN = "unknown"
 
 
-class Sentiment(str, Enum):
+class Sentiment(StrEnum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
     NEUTRAL = "neutral"

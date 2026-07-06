@@ -10,10 +10,10 @@ Design:
 """
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 from typing import Annotated
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from app.core.supabase import supabase_session
@@ -23,10 +23,9 @@ from app.schemas.schemas import (
     ItemCreate,
     ItemUpdate,
     PaginatedResponse,
-    SearchQuery,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/items", tags=["items"])
 
 
@@ -78,11 +77,11 @@ async def create_item(
       3. Generate semantic embedding
       4. Upsert item + tags + category in Supabase
     """
+    from app.services.ai_service import AnalysisError
     from app.services.extraction_service import (
         ContentExtractionError,
         extract_content,
     )
-    from app.services.ai_service import AnalysisError
 
     # ── Step 1: Extract content (if text not pre-filled) ────────────────────
     url_str = str(payload.url)
@@ -443,7 +442,7 @@ async def reanalyse_item(item_id: str, auth: AuthDep) -> Item:
             raise HTTPException(
                 status_code=502,
                 detail="AI service temporarily unavailable. Try again later.",
-            )
+            ) from None
 
         update_data = {
             "embedding": embedding,

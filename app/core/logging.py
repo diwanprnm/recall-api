@@ -6,18 +6,18 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any
+from typing import TYPE_CHECKING
 
 import structlog
-from structlog.types import Processor
 
 from app.core.config import get_settings
 
+if TYPE_CHECKING:
+    from structlog.types import Processor
 
-def add_timestamp(logger: Any, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
-    import datetime
-    event_dict["timestamp"] = datetime.datetime.utcnow().isoformat() + "Z"
-    return event_dict
+# Silence noisy third-party libraries
+for _noisy_lib in ["httpx", "httpcore", "urllib3", "openai"]:
+    logging.getLogger(_noisy_lib).setLevel(logging.WARNING)
 
 
 def configure_logging() -> None:
@@ -28,14 +28,13 @@ def configure_logging() -> None:
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
-        add_timestamp,
+        structlog.processors.TimeStamper(fmt="iso"),
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.UnicodeDecoder(),
     ]
 
     if cfg.is_production:
-        processors.append(structlog.processors.TimeStamper(fmt="iso"))
         processors.append(structlog.processors.JSONRenderer())
     else:
         processors.append(structlog.dev.ConsoleRenderer(colors=True))
@@ -47,10 +46,6 @@ def configure_logging() -> None:
         logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
-
-    # Silence noisy third-party libraries
-    for noisy_lib in ["httpx", "httpcore", "urllib3", "openai"]:
-        logging.getLogger(noisy_lib).setLevel(logging.WARNING)
 
     logging.basicConfig(
         format="%(message)s",

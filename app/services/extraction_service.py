@@ -14,16 +14,16 @@ The goal is to go beyond just saving a URL — we want:
 """
 from __future__ import annotations
 
-import logging
 import re
 from typing import TypedDict
 
 import httpx
+import structlog
 from bs4 import BeautifulSoup
 
 from app.schemas.schemas import Platform
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ── Result type ───────────────────────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ async def extract_content(url: str) -> ExtractedContent:
     title = (
         og.title
         or og.twitter_title
-        or soup.title.string
+        or (soup.title.string if soup.title else None)
         or meta.description
     )
     description = og.description or og.twitter_description or meta.description
@@ -163,7 +163,10 @@ async def _extract_text_content(
     for script in soup.find_all("script", type="application/ld+json"):
         try:
             import json
-            data = json.loads(script.string)
+            script_content = script.string
+            if not script_content:
+                continue
+            data = json.loads(script_content)
             if isinstance(data, dict):
                 if data.get("@type") in {"Article", "NewsArticle", "BlogPosting"}:
                     text = data.get("articleBody") or data.get("text")

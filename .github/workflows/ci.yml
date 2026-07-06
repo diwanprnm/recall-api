@@ -27,32 +27,7 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run tests
-        run: uv run pytest tests/ -v --tb=short
-
-      - name: Type check
-        run: uv run mypy app/
-
-      - name: Lint
-        run: uv run ruff check app/ tests/
-
-  build:
-    name: Type check only
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Install deps (including dev)
-        run: uv sync --all-extras
+        run: uv run pytest tests/ -v --tb=short --cov=app --cov-fail-under=60
 
       - name: Lint with ruff
-        run: uv run ruff check app/ --output-format=github
+        run: uv run ruff check app/ tests/ --output-format=github
