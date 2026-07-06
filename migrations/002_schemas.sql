@@ -247,16 +247,21 @@ CREATE OR REPLACE TRIGGER users_updated_at
     BEFORE UPDATE ON public.users
     FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
--- ── Grant permissions for service role ───────────────────────────────────────
--- The SERVICE ROLE key bypasses RLS, so it can do everything.
--- The ANON key respects RLS, so it can only access data the user owns.
-
-GRANT USAGE ON SCHEMA public TO supabase_service_role;
-GRANT ALL ON ALL TABLES IN SCHEMA public TO supabase_service_role;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO supabase_service_role;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO supabase_service_role;
-
--- Grant to authenticated users
-GRANT USAGE ON SCHEMA public TO authenticated;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+-- ── Grant permissions for service role ─────────────────────────────────────
+-- Note: supabase_service_role may not exist in all Supabase projects.
+-- Grant only if the role exists.
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_service_role') THEN
+        GRANT USAGE ON SCHEMA public TO supabase_service_role;
+        GRANT ALL ON ALL TABLES IN SCHEMA public TO supabase_service_role;
+        GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO supabase_service_role;
+        GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO supabase_service_role;
+    END IF;
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+        GRANT USAGE ON SCHEMA public TO authenticated;
+        GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated;
+        GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+    END IF;
+END
+$$;
