@@ -116,12 +116,21 @@ BEGIN
 END;
 $$;
 
--- Grant execute to authenticated users
-GRANT EXECUTE ON FUNCTION public.match_items(
-    VECTOR, FLOAT, INT, TEXT, TEXT[]
-) TO authenticated, supabase_service_role;
-
--- ── Hybrid search: vector + keyword (optional enhancement) ────────────────────
+-- Grant execute to authenticated users (guard for Supabase free tier)
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_service_role') THEN
+        GRANT EXECUTE ON FUNCTION public.match_items(
+            VECTOR, FLOAT, INT, TEXT, TEXT[]
+        ) TO supabase_service_role;
+    END IF;
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+        GRANT EXECUTE ON FUNCTION public.match_items(
+            VECTOR, FLOAT, INT, TEXT, TEXT[]
+        ) TO authenticated;
+    END IF;
+END
+$$;
 
 CREATE OR REPLACE FUNCTION public.hybrid_search(
     search_query      TEXT,
@@ -196,11 +205,21 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.hybrid_search(
-    TEXT, VECTOR, FLOAT, INT, TEXT
-) TO authenticated, supabase_service_role;
-
--- ── Resurfacing: items not seen in N days (for daily digest) ─────────────────
+-- Grant execute (guard for Supabase free tier)
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_service_role') THEN
+        GRANT EXECUTE ON FUNCTION public.hybrid_search(
+            TEXT, VECTOR, FLOAT, INT, TEXT
+        ) TO supabase_service_role;
+    END IF;
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+        GRANT EXECUTE ON FUNCTION public.hybrid_search(
+            TEXT, VECTOR, FLOAT, INT, TEXT
+        ) TO authenticated;
+    END IF;
+END
+$$;
 
 CREATE OR REPLACE FUNCTION public.get_resurfacing_candidates(
     days_since_last_read INT DEFAULT 7,
@@ -246,5 +265,16 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.get_resurfacing_candidates(INT, INT)
-TO authenticated, supabase_service_role;
+-- Grant execute (guard for Supabase free tier)
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_service_role') THEN
+        GRANT EXECUTE ON FUNCTION public.get_resurfacing_candidates(INT, INT)
+        TO supabase_service_role;
+    END IF;
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+        GRANT EXECUTE ON FUNCTION public.get_resurfacing_candidates(INT, INT)
+        TO authenticated;
+    END IF;
+END
+$$;
