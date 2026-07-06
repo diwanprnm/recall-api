@@ -61,4 +61,14 @@ SELECT
 FROM items
 GROUP BY user_id;
 
-GRANT SELECT ON public.user_stats TO authenticated, supabase_service_role;
+-- Guard grant for Supabase free tier
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_service_role') THEN
+        GRANT SELECT ON public.user_stats TO supabase_service_role;
+    END IF;
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+        GRANT SELECT ON public.user_stats TO authenticated;
+    END IF;
+END
+$$;
