@@ -157,7 +157,7 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
         try:
             from app.core.supabase import get_supabase_client
             client = get_supabase_client()
-            await client.table("_prisma_migrations").select("id").limit(1).execute()
+            client.table("tags").select("id").limit(1).execute()
             return {"status": "ready", "database": "connected"}
         except Exception as exc:
             logger.error("Readiness check failed", error=str(exc))
