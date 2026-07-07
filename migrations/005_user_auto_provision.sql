@@ -13,7 +13,7 @@ CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, auth
 AS $$
 BEGIN
     INSERT INTO public.users (id, email, name, avatar_url)
@@ -36,6 +36,11 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
+-- SECURITY DEFINER + superuser owner = trigger runs with full privileges,
+-- so it can INSERT into public.users even from auth.users INSERTs.
+-- Re-set the owner to postgres explicitly to ensure success.
+ALTER FUNCTION public.handle_new_user() OWNER TO postgres;
 
 -- ── Trigger: fire on auth.users INSERT ───────────────────────────────────────
 
@@ -63,14 +68,8 @@ INSERT INTO public.digest_settings (user_id)
 SELECT id FROM public.users
 ON CONFLICT (user_id) DO NOTHING;
 
--- ── GRANT EXECUTE on the function to the supabase_auth_admin ────────────────
--- This is so the auth schema can invoke it (since auth.users is owned by supabase_auth_admin).
-DO $$
-BEGIN
-    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN
-        GRANT USECAGE ON SCHEMA public TO supabase_auth_admin;
-        GRANT INSERT, UPDATE ON public.users TO supabase_auth_admin;
-        GRANT INSERT ON public.digest_settings TO supabase_auth_admin;
-    END IF;
-END
-$$;
+-- ── Note ────────────────────────────────────────────────────────────────────
+-- Because handle_new_user() uses SECURITY DEFINER, it always executes with
+-- the privileges of the function owner (which is superuser on Supabase).
+-- That means the auth schema can call the trigger without any extra grants.
+-- This works on both Auth-Back and Free tier Supabase projects.
