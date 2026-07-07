@@ -10,10 +10,10 @@ Architecture:
 """
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
-
 import structlog
 import uvicorn
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,8 +28,8 @@ logger = structlog.get_logger()
 
 # ── Global service singletons (initialised on startup) ────────────────────────
 
-_ai_service: app.services.ai_service.AIService | None = None
-_embedding_service: app.services.embedding_service.EmbeddingService | None = None
+_ai_service: "app.services.ai_service.AIService | None" = None
+_embedding_service: "app.services.embedding_service.EmbeddingService | None" = None
 
 
 def get_ai_service():
@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
         debug=cfg.debug,
     )
 
-    # ── Initialise Supabase client ─────────────────────────────────────────────
+    # ── Initialise Supabase client ────────────────────────────────────────────
     try:
         get_supabase_client()
         logger.info("Supabase client ready", url=cfg.supabase_url)
@@ -71,8 +71,8 @@ async def lifespan(app: FastAPI):
 
     # ── Initialise AI services ────────────────────────────────────────────────
     from app.core.ai import get_async_instructor
-    from app.services.ai_service import AIService
     from app.services.embedding_service import EmbeddingService
+    from app.services.ai_service import AIService
 
     global _ai_service, _embedding_service
     try:
@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("Recall API startup complete", port=cfg.port)
 
-    yield  # ── Application runs here ─────────────────────────────────────────
+    yield  # ── Application runs here ────────────────────────────────────────────
 
     # ── Shutdown ────────────────────────────────────────────────────────────────
     logger.info("Shutting down Recall API")
@@ -128,14 +128,24 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
 """,
         version=__import__("app").__version__,
         lifespan=lifespan,
-        docs_url="/docs" if not cfg.is_production else None,  # hide docs in prod
+        docs_url="/docs" if not cfg.is_production else None,
         redoc_url="/redoc" if not cfg.is_production else None,
     )
 
     # ── Middleware ──────────────────────────────────────────────────────────────
+    # In development: allow any localhost port via regex
+    # In production: only configured origins
+    if cfg.is_production:
+        cors_origins = cfg.allowed_origins_list
+        cors_origin_regex = None
+    else:
+        cors_origins = ["http://localhost:3000", "http://localhost:5173"]
+        cors_origin_regex = r"http://(localhost|127\.0\.0\.1)(:\d+)?"
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cfg.allowed_origins_list,
+        allow_origins=cors_origins,
+        allow_origin_regex=cors_origin_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -153,17 +163,21 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
 
     @app.get("/health/ready", tags=["health"])
     async def readiness_check():
-        """Full readiness: checks Supabase connectivity."""
+        """Full readiness: checks Supabase connectivity using sync admin client."""
         try:
-            from app.core.supabase import get_supabase_client
-            client = get_supabase_client()
-            client.table("tags").select("id").limit(1).execute()
+            from app.core.supabase import get_supabase_admin
+            admin = get_supabase_admin()
+            admin.table("tags").select("id").limit(1).execute()
             return {"status": "ready", "database": "connected"}
         except Exception as exc:
             logger.error("Readiness check failed", error=str(exc))
             return JSONResponse(
                 status_code=503,
-                content={"status": "not ready", "database": "disconnected"},
+                content={
+                    "status": "not ready",
+                    "database": "disconnected",
+                    "error": str(exc),
+                },
             )
 
     # ── Global exception handlers ──────────────────────────────────────────────
