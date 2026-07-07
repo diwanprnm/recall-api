@@ -38,6 +38,8 @@ def get_supabase_client() -> Client:
             supabase_url=cfg.supabase_url,
             supabase_key=cfg.supabase_anon_key,
         )
+        # Ensure the apikey header is set (used for anon access to schema)
+        _client.options.headers["apikey"] = cfg.supabase_anon_key
         logger.info("Supabase anon client initialised")
     return _client
 
@@ -51,6 +53,7 @@ def get_supabase_admin() -> Client:
             supabase_url=cfg.supabase_url,
             supabase_key=cfg.supabase_service_role_key,
         )
+        _admin_client.options.headers["apikey"] = cfg.supabase_service_role_key
         logger.info("Supabase admin client initialised")
     return _admin_client
 
@@ -61,19 +64,32 @@ def supabase_session(jwt: str) -> Generator[Client, None, None]:
     Sync context manager: attaches a user's JWT to the Supabase client so RLS
     policies are enforced (`auth.uid()` resolves to that user).
 
+    The PostgREST layer reads the `Authorization: Bearer <jwt>` header to
+    determine the current user. So we set both:
+    - The Authorization header (for `auth.uid()` RLS checks)
+    - The apikey header (kept as anon key, or already set by create_client)
+
     Usage in route handlers:
         with supabase_session(request.headers.get("Authorization", "")) as sb:
             result = sb.table("items").select("*").execute()
     """
     client = get_supabase_client()
     token = jwt.replace("Bearer ", "", 1) if jwt.startswith("Bearer ") else jwt
-    # Set the session so RLS evaluates auth.uid() correctly
-    client.auth.set_session(access_token=token, refresh_token="")
+
+    # Save current Authorization header
+    previous_auth = client.options.headers.get("Authorization")
+
+    # Set user's JWT as Authorization (PostgREST uses this for auth.uid())
+    client.options.headers["Authorization"] = f"Bearer {token}"
+
     try:
         yield client
     finally:
-        # No explicit sign-out needed for single-request sessions
-        pass
+        # Restore previous Authorization
+        if previous_auth is None:
+            client.options.headers.pop("Authorization", None)
+        else:
+            client.options.headers["Authorization"] = previous_auth
 
 
 def close_supabase_clients() -> None:
