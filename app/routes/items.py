@@ -118,7 +118,7 @@ async def create_item(
         analysis, embedding = None, None
 
     # ── Step 3: Store in Supabase ───────────────────────────────────────────
-    async with supabase_session(auth) as sb:
+    with supabase_session(auth) as sb:
         # Upsert item
         item_data = {
             "url": url_str,
@@ -143,7 +143,7 @@ async def create_item(
         # Filter None values (Supabase doesn't like nulls in dict literals)
         item_data = {k: v for k, v in item_data.items() if v is not None}
 
-        resp = await sb.table("items").insert(item_data).execute()
+        resp = sb.table("items").insert(item_data).execute()
 
         if not resp.data:
             raise HTTPException(
@@ -160,9 +160,9 @@ async def create_item(
 
         # ── Step 5: Upsert category ─────────────────────────────────────────
         if payload.override_category and analysis:
-            cat_id = await _upsert_category(sb, item["user_id"], payload.override_category)
+            cat_id = _upsert_category(sb, item["user_id"], payload.override_category)
             if cat_id:
-                await sb.table("items").update({"category_id": cat_id}).eq("id", item["id"]).execute()
+                sb.table("items").update({"category_id": cat_id}).eq("id", item["id"]).execute()
 
         # Refetch with related data
         return await _get_item_with_relations(sb, item["id"])
@@ -261,7 +261,7 @@ async def list_items(
     Supports filtering by platform, tag, category, favorite, archived.
     For semantic search, use POST /search instead.
     """
-    async with supabase_session(auth) as sb:
+    with supabase_session(auth) as sb:
         query = sb.table("items").select("*, tags:item_tags(tag:tags(name))", count="exact")
 
         if platform:
@@ -282,7 +282,7 @@ async def list_items(
         query = query.order("saved_at", desc=True)
         query = query.range((page - 1) * per_page, page * per_page - 1)
 
-        resp = await query.execute()
+        resp = query.execute()
         total = resp.count or 0
 
         items = []
@@ -332,7 +332,7 @@ async def list_items(
     summary="Get a single item",
 )
 async def get_item(auth: AuthDep, item_id: str) -> Item:
-    async with supabase_session(auth) as sb:
+    with supabase_session(auth) as sb:
         return await _get_item_with_relations(sb, item_id)
 
 
@@ -349,28 +349,28 @@ async def update_item(
     auth: AuthDep,
 ) -> Item:
     """Update item fields. Tags/category updates replace all existing tags."""
-    async with supabase_session(auth) as sb:
+    with supabase_session(auth) as sb:
         update_data = payload.model_dump(exclude_unset=True, exclude_none=True)
         if update_data:
-            await sb.table("items").update(update_data).eq("id", item_id).execute()
+            sb.table("items").update(update_data).eq("id", item_id).execute()
 
         # If tags or category provided, replace them
         if payload.override_tags is not None:
-            item_resp = await sb.table("items").select("user_id").eq("id", item_id).execute()
+            item_resp = sb.table("items").select("user_id").eq("id", item_id).execute()
             if item_resp.data:
                 user_id = item_resp.data[0]["user_id"]
                 # Remove existing tags
-                await sb.table("item_tags").delete().eq("item_id", item_id).execute()
+                sb.table("item_tags").delete().eq("item_id", item_id).execute()
                 # Re-add (AI suggestions + user overrides combined)
                 if payload.override_tags:
                     await _upsert_tags(sb, user_id, payload.override_tags, item_id)
 
         if payload.override_category:
-            item_resp = await sb.table("items").select("user_id").eq("id", item_id).execute()
+            item_resp = sb.table("items").select("user_id").eq("id", item_id).execute()
             if item_resp.data:
-                cat_id = await _upsert_category(sb, item_resp.data[0]["user_id"], payload.override_category)
+                cat_id = _upsert_category(sb, item_resp.data[0]["user_id"], payload.override_category)
                 if cat_id:
-                    await sb.table("items").update({"category_id": cat_id}).eq("id", item_id).execute()
+                    sb.table("items").update({"category_id": cat_id}).eq("id", item_id).execute()
 
         return await _get_item_with_relations(sb, item_id)
 
@@ -388,13 +388,13 @@ async def delete_item(
     hard: Annotated[bool, Query(description="If true, permanently delete instead of archiving")] = False,
 ) -> ApiResponse:
     """Soft-delete (archive) by default. Use ?hard=true for permanent deletion."""
-    async with supabase_session(auth) as sb:
+    with supabase_session(auth) as sb:
         if hard:
-            await sb.table("item_tags").delete().eq("item_id", item_id).execute()
-            await sb.table("items").delete().eq("id", item_id).execute()
+            sb.table("item_tags").delete().eq("item_id", item_id).execute()
+            sb.table("items").delete().eq("id", item_id).execute()
             message = "Item permanently deleted"
         else:
-            await sb.table("items").update({"is_archived": True}).eq("id", item_id).execute()
+            sb.table("items").update({"is_archived": True}).eq("id", item_id).execute()
             message = "Item archived (use ?hard=true to permanently delete)"
     return ApiResponse(success=True, message=message)
 
@@ -413,8 +413,8 @@ async def reanalyse_item(item_id: str, auth: AuthDep) -> Item:
     """
     from app.services.ai_service import AnalysisError
 
-    async with supabase_session(auth) as sb:
-        resp = await sb.table("items").select("*").eq("id", item_id).execute()
+    with supabase_session(auth) as sb:
+        resp = sb.table("items").select("*").eq("id", item_id).execute()
         if not resp.data:
             raise HTTPException(status_code=404, detail="Item not found")
         item = resp.data[0]
@@ -453,11 +453,11 @@ async def reanalyse_item(item_id: str, auth: AuthDep) -> Item:
             "quality_score": analysis.quality_score,
         }
 
-        await sb.table("items").update(update_data).eq("id", item_id).execute()
+        sb.table("items").update(update_data).eq("id", item_id).execute()
 
         # Update tags
         if analysis.suggested_tags:
-            await sb.table("item_tags").delete().eq("item_id", item_id).execute()
+            sb.table("item_tags").delete().eq("item_id", item_id).execute()
             await _upsert_tags(sb, item["user_id"], analysis.suggested_tags, item_id)
 
         return await _get_item_with_relations(sb, item_id)

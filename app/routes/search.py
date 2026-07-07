@@ -84,7 +84,7 @@ async def semantic_search(
     # ── Step 2: pgvector search via Supabase RPC ─────────────────────────────
     # We use an RPC function for the vector search to keep SQL out of the app.
     # The RPC `match_items` is defined in migration 002_schemas.sql.
-    async with supabase_session(auth) as sb:
+    with supabase_session(auth) as sb:
         try:
             # Call the RPC function — returns items with similarity score
             rpc_result = await sb.rpc(
@@ -171,9 +171,9 @@ async def find_related(
     Find items similar to an existing saved item.
     Useful for "more like this" or knowledge graph traversal.
     """
-    async with supabase_session(auth) as sb:
+    with supabase_session(auth) as sb:
         # Get the existing item's embedding
-        resp = await sb.table("items").select("id, embedding, title").eq("id", item_id).execute()
+        resp = sb.table("items").select("id, embedding, title").eq("id", item_id).execute()
         if not resp.data:
             raise HTTPException(status_code=404, detail="Item not found")
         item = resp.data[0]
@@ -188,7 +188,7 @@ async def find_related(
     payload.query = ""  # signal to skip embedding (we already have it)
     # Hack: store vector in a temp attribute (simpler than duplicating the search logic)
     # Instead, just call the RPC directly with the stored vector
-    async with supabase_session(auth) as sb:
+    with supabase_session(auth) as sb:
         rpc_result = await sb.rpc(
             "match_items",
             {

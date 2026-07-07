@@ -49,7 +49,7 @@ async def get_profile(auth: AuthDep) -> UserProfile:
     The JWT is issued by Supabase after email/password or OAuth sign-in.
     We verify it server-side using Supabase's built-in JWT verification.
     """
-    async with supabase_session(auth) as sb:
+    with supabase_session(auth) as sb:
         try:
             user = await sb.auth.get_user()
         except Exception as exc:
@@ -85,7 +85,7 @@ async def verify_token(auth: AuthDep) -> ApiResponse:
     Lightweight health-check endpoint — just confirms the JWT is valid.
     Useful for the frontend to verify a stored session is still good.
     """
-    async with supabase_session(auth) as sb:
+    with supabase_session(auth) as sb:
         try:
             await sb.auth.get_user()
         except Exception:
