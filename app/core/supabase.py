@@ -2,9 +2,9 @@
 Supabase client — single sync instance, lazily created.
 
 Why SYNC, not async?
-- Supabase's `create_async_client` is itself a coroutine — adds complexity
-- For our use case (FastAPI server), sync calls inside async handlers
-  are perfectly fine — FastAPI runs them in a thread pool internally
+- `create_async_client` of the supabase library returns a coroutine from the factory
+- For our use case (FastAPI server), sync calls inside async handlers run in
+  FastAPI's thread pool — no perf cost for DB I/O
 - Simpler code, fewer await mistakes
 
 Two clients are exported:
@@ -30,7 +30,13 @@ _admin_client: Client | None = None
 
 
 def get_supabase_client() -> Client:
-    """Sync anon client. Used in route handlers (with JWT attached)."""
+    """Sync anon client. Used in route handlers (with JWT attached).
+
+    The default `create_client()` already populates the Authorization
+    header with `Bearer <anon_key>` and the apikey header — both required
+    by PostgREST. Setting them again with the same value causes no issues
+    but adds nothing, so we just rely on defaults.
+    """
     global _client
     if _client is None:
         cfg = get_settings()
@@ -38,8 +44,6 @@ def get_supabase_client() -> Client:
             supabase_url=cfg.supabase_url,
             supabase_key=cfg.supabase_anon_key,
         )
-        # Ensure the apikey header is set (used for anon access to schema)
-        _client.options.headers["apikey"] = cfg.supabase_anon_key
         logger.info("Supabase anon client initialised")
     return _client
 
@@ -53,7 +57,6 @@ def get_supabase_admin() -> Client:
             supabase_url=cfg.supabase_url,
             supabase_key=cfg.supabase_service_role_key,
         )
-        _admin_client.options.headers["apikey"] = cfg.supabase_service_role_key
         logger.info("Supabase admin client initialised")
     return _admin_client
 
@@ -61,13 +64,19 @@ def get_supabase_admin() -> Client:
 @contextmanager
 def supabase_session(jwt: str) -> Generator[Client, None, None]:
     """
-    Sync context manager: attaches a user's JWT to the Supabase client so RLS
-    policies are enforced (`auth.uid()` resolves to that user).
+    Sync context manager: attaches a user's JWT so PostgREST can extract
+    `auth.uid()` for RLS policy evaluation.
 
-    The PostgREST layer reads the `Authorization: Bearer <jwt>` header to
-    determine the current user. So we set both:
-    - The Authorization header (for `auth.uid()` RLS checks)
-    - The apikey header (kept as anon key, or already set by create_client)
+    Supabase's `auth.set_session()` only mutates the *auth* client's session
+    storage. PostgREST reads the **HTTP** headers directly. So we have to flip
+    the Authorization header on the underlying client for the duration of
+    the request, then restore it on exit.
+
+    Supabase new key format uses different prefixes:
+      - `sb_publishable_…` for anon key
+      - `sb_secret_…` for service_role key
+
+    Both work, just need to be passed through correctly.
 
     Usage in route handlers:
         with supabase_session(request.headers.get("Authorization", "")) as sb:
@@ -75,17 +84,21 @@ def supabase_session(jwt: str) -> Generator[Client, None, None]:
     """
     client = get_supabase_client()
     token = jwt.replace("Bearer ", "", 1) if jwt.startswith("Bearer ") else jwt
+    if not token:
+        yield client
+        return
 
-    # Save current Authorization header
+    # Save current Authorization header (the anon-key default)
     previous_auth = client.options.headers.get("Authorization")
 
-    # Set user's JWT as Authorization (PostgREST uses this for auth.uid())
+    # Forward the user's JWT — PostgREST reads it and populates auth.uid()
     client.options.headers["Authorization"] = f"Bearer {token}"
 
     try:
         yield client
     finally:
-        # Restore previous Authorization
+        # Restore the anon-key Authorization header so other callers
+        # (e.g. the lifespan health-check) don't see a stale user JWT.
         if previous_auth is None:
             client.options.headers.pop("Authorization", None)
         else:
