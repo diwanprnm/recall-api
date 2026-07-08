@@ -168,7 +168,7 @@ async def create_item(
         # ── Step 4: Upsert tags ─────────────────────────────────────────────
         if analysis:
             all_tags = list({*analysis.suggested_tags, *payload.override_tags})
-            await _upsert_tags(sb, item["user_id"], all_tags, item["id"])
+            _upsert_tags(sb, item["user_id"], all_tags, item["id"])
 
         # ── Step 5: Upsert category ─────────────────────────────────────────
         if payload.override_category and analysis:
@@ -177,40 +177,40 @@ async def create_item(
                 sb.table("items").update({"category_id": cat_id}).eq("id", item["id"]).execute()
 
         # Refetch with related data
-        return await _get_item_with_relations(sb, item["id"])
+        return _get_item_with_relations(sb, item["id"])
 
 
-async def _upsert_tags(sb, user_id: str, tag_names: list[str], item_id: str) -> None:
+def _upsert_tags(sb, user_id: str, tag_names: list[str], item_id: str) -> None:
     """Upsert tag records and link them to the item via ItemTag."""
     for tag_name in tag_names:
         tag_name = tag_name.strip().lower()
         if not tag_name or len(tag_name) > 50:
             continue
         # Upsert tag
-        tag_resp = await sb.table("tags").upsert(
+        tag_resp = sb.table("tags").upsert(
             {"user_id": user_id, "name": tag_name},
             on_conflict="user_id,name",
         ).execute()
         tag_id = tag_resp.data[0]["id"]
         # Link tag → item
-        await sb.table("item_tags").upsert(
+        sb.table("item_tags").upsert(
             {"item_id": item_id, "tag_id": tag_id},
             on_conflict="item_id,tag_id",
         ).execute()
 
 
-async def _upsert_category(sb, user_id: str, category_name: str) -> str | None:
+def _upsert_category(sb, user_id: str, category_name: str) -> str | None:
     """Upsert category, return its ID."""
-    cat_resp = await sb.table("categories").upsert(
+    cat_resp = sb.table("categories").upsert(
         {"user_id": user_id, "name": category_name.strip()},
         on_conflict="user_id,name",
     ).execute()
     return cat_resp.data[0]["id"] if cat_resp.data else None
 
 
-async def _get_item_with_relations(sb, item_id: str) -> Item:
+def _get_item_with_relations(sb, item_id: str) -> Item:
     """Fetch item with its tags and category name joined."""
-    resp = await sb.table("items").select(
+    resp = sb.table("items").select(
         "*, tags:item_tags(tag:tags(name))"
     ).eq("id", item_id).execute()
     if not resp.data:
@@ -345,7 +345,7 @@ async def list_items(
 )
 async def get_item(auth: AuthDep, item_id: str) -> Item:
     with supabase_session(auth) as sb:
-        return await _get_item_with_relations(sb, item_id)
+        return _get_item_with_relations(sb, item_id)
 
 
 # ── PATCH /items/{id} — Update item ───────────────────────────────────────────
@@ -375,7 +375,7 @@ async def update_item(
                 sb.table("item_tags").delete().eq("item_id", item_id).execute()
                 # Re-add (AI suggestions + user overrides combined)
                 if payload.override_tags:
-                    await _upsert_tags(sb, user_id, payload.override_tags, item_id)
+                    _upsert_tags(sb, user_id, payload.override_tags, item_id)
 
         if payload.override_category:
             item_resp = sb.table("items").select("user_id").eq("id", item_id).execute()
@@ -384,7 +384,7 @@ async def update_item(
                 if cat_id:
                     sb.table("items").update({"category_id": cat_id}).eq("id", item_id).execute()
 
-        return await _get_item_with_relations(sb, item_id)
+        return _get_item_with_relations(sb, item_id)
 
 
 # ── DELETE /items/{id} — Archive or hard-delete ─────────────────────────────
@@ -470,6 +470,6 @@ async def reanalyse_item(item_id: str, auth: AuthDep) -> Item:
         # Update tags
         if analysis.suggested_tags:
             sb.table("item_tags").delete().eq("item_id", item_id).execute()
-            await _upsert_tags(sb, item["user_id"], analysis.suggested_tags, item_id)
+            _upsert_tags(sb, item["user_id"], analysis.suggested_tags, item_id)
 
-        return await _get_item_with_relations(sb, item_id)
+        return _get_item_with_relations(sb, item_id)
