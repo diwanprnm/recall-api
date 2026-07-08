@@ -206,3 +206,51 @@ npm run dev   # http://localhost:3000
 ## 📞 If the thread is lost — start here
 
 The user would say something like "lanjut Phase 3" or "ringkas state recall". **Open this file first** to see where we left off, then check both repos for the latest commit on `main`.
+
+
+---
+
+## 📱 Phase 2.5: PWA Transformation (added 2026-07-08 04:46)
+
+Aligned with PORTFOLIO-PLAN.md "low save friction" pain point + "Mobile companion app" nice-to-have.
+
+### New PWA stack
+- **Web App Manifest** (`src/app/manifest.ts`) — Next.js 16 built-in
+  - Standalone display mode (full-screen, no browser chrome)
+  - Maskable icons (Android adaptive)
+  - 3 shortcuts: Library / Search / Save URL
+  - Apple web app config
+- **Service Worker** (`public/sw.js`) — manual implementation
+  - Network-first for HTML / navigations
+  - Cache-first for static icons
+  - Offline fallback → `offline.html`
+  - Push notification handler scaffold (Daily Digest ready)
+- **10 PWA icons** (192/384/512/1024px + apple touch + 3 shortcut icons)
+  - Brand gradient: purple `#667eea` → violet `#764ba2`
+  - Generated via Pillow script
+- **Install Prompt** (`components/pwa/install-prompt.tsx`)
+  - Android/Chrome/Edge: native `beforeinstallprompt` event
+  - iOS Safari: separate "share → Add to Home Screen" hint
+- **ShareToRecallButton** (`components/pwa/share-button.tsx`)
+  - Web Share API on mobile → native share sheet
+  - Desktop fallback: opens Save modal pre-filled with URL
+- **`?add_url=` param** in dashboard
+  - Server-routed Web Share → dashboard opens AddItemModal pre-filled
+  - One-tap save from mobile share sheet
+
+### Mobile PWA flow (matches IDEATION-CANVAS "Zero-friction saving" #1)
+```
+User on Twitter mobile → Share → Recall → AddItemModal auto-opens → AI analyzes
+```
+
+### Build verified
+- `next build` succeeds, 7 routes prerender
+- `/manifest.webmanifest` served at root
+- Icons generated and present in `/public/icons/`
+- Service worker registration deferred to production builds
+
+### What this unlocks
+- Install Recall to home screen on Android/iOS like a native app
+- Receive push notifications (Daily Digest later)
+- Share URL from any mobile app → 1-tap to save to Recall
+- Offline shell access (real offline data sync is future work)
