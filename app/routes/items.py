@@ -120,9 +120,17 @@ async def create_item(
     # ── Step 3: Store in Supabase ───────────────────────────────────────────
     with supabase_session(auth) as sb:
         # ── Extract user_id from JWT ───────────────────────────────────────
-        from app.core.jwt import extract_user_id_from_jwt
+        from app.core.jwt import extract_user_id_from_jwt, is_jwt_expired
 
         token = auth.replace("Bearer ", "", 1) if auth.startswith("Bearer ") else auth
+
+        if is_jwt_expired(token):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired. Please sign in again.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         user_id = extract_user_id_from_jwt(token)
         if not user_id:
             raise HTTPException(
