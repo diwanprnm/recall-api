@@ -1,0 +1,48 @@
+# python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.venv/
+venv/
+
+# Node (we don't use npm at runtime, only build)
+node_modules/
+.next/
+out/
+
+# Local env files
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+build/
+dist/
+*.tar.gz
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Tests don't ship in image
+tests/
+
+# Caches
+.cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/
