@@ -133,14 +133,14 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
     )
 
     # ── Middleware ──────────────────────────────────────────────────────────────
-    # In development: allow any localhost port via regex
+    # In development: allow any origin (for mobile testing over LAN)
     # In production: only configured origins
     if cfg.is_production:
         cors_origins = cfg.allowed_origins_list
         cors_origin_regex = None
     else:
-        cors_origins = ["http://localhost:3000", "http://localhost:5173"]
-        cors_origin_regex = r"http://(localhost|127\.0\.0\.1)(:\d+)?"
+        cors_origins = cfg.allowed_origins_list  # use comma-separated from ALLOWED_ORIGINS env
+        cors_origin_regex = cfg.allowed_origins.strip()  # allow any configured origin
 
     app.add_middleware(
         CORSMiddleware,
@@ -149,6 +149,7 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Content-Range", "X-Total-Count"],
     )
 
     # ── Routes ──────────────────────────────────────────────────────────────────
