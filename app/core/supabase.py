@@ -29,14 +29,8 @@ _client: Client | None = None
 _admin_client: Client | None = None
 
 
-def get_supabase_client() -> Client:
-    """Sync anon client. Used in route handlers (with JWT attached).
-
-    The default `create_client()` already populates the Authorization
-    header with `Bearer <anon_key>` and the apikey header — both required
-    by PostgREST. Setting them again with the same value causes no issues
-    but adds nothing, so we just rely on defaults.
-    """
+def _init_client() -> None:
+    """Lazy initialise the anon client once per worker."""
     global _client
     if _client is None:
         cfg = get_settings()
@@ -45,7 +39,12 @@ def get_supabase_client() -> Client:
             supabase_key=cfg.supabase_anon_key,
         )
         logger.info("Supabase anon client initialised")
-    return _client
+
+
+def get_supabase_client() -> Client:
+    """Sync anon client that uses the ANON key + respects RLS."""
+    _init_client()
+    return _client  # type: ignore[return-value]
 
 
 def get_supabase_admin() -> Client:
@@ -64,41 +63,42 @@ def get_supabase_admin() -> Client:
 @contextmanager
 def supabase_session(jwt: str) -> Generator[Client, None, None]:
     """
-    Sync context manager: attaches a user's JWT so PostgREST can extract
+    Sync context manager: forward the user's JWT so PostgREST can extract
     `auth.uid()` for RLS policy evaluation.
 
-    Supabase's `auth.set_session()` only mutates the *auth* client's session
-    storage. PostgREST reads the **HTTP** headers directly. So we have to flip
-    the Authorization header on the underlying client for the duration of
-    the request, then restore it on exit.
+    CRITICAL: ``client.auth.set_session()`` only mutates the *auth* client's
+    internal session object. PostgREST REST calls read **HTTP_Authorization**
+    directly from the request header (set via the underlying httpx client).
 
-    Supabase new key format uses different prefixes:
-      - `sb_publishable_…` for anon key
-      - `sb_secret_…` for service_role key
+    Therefore we must mutate ``client.options.headers["Authorization"]`` to
+    the user's JWT so that every subsequent ``.execute()`` call sends the Bearer
+    token. On exit we restore the anon-key default.
 
-    Both work, just need to be passed through correctly.
-
-    Usage in route handlers:
+    Usage:
         with supabase_session(request.headers.get("Authorization", "")) as sb:
-            result = sb.table("items").select("*").execute()
+            items = sb.table("items").select("*").execute()
     """
-    client = get_supabase_client()
+    _init_client()
+    client = _client  # type: ignore[union-attr]
+
     token = jwt.replace("Bearer ", "", 1) if jwt.startswith("Bearer ") else jwt
     if not token:
+        logger.warning("No JWT token provided to supabase_session — RLS will use anon key")
         yield client
         return
 
-    # Save current Authorization header (the anon-key default)
+    # Store the original anon-key default
     previous_auth = client.options.headers.get("Authorization")
 
-    # Forward the user's JWT — PostgREST reads it and populates auth.uid()
+    # Override with user JWT so PostgREST sees a real auth.uid()
     client.options.headers["Authorization"] = f"Bearer {token}"
 
     try:
+        logger.debug("Supabase session: using JWT for PostgREST auth")
         yield client
     finally:
-        # Restore the anon-key Authorization header so other callers
-        # (e.g. the lifespan health-check) don't see a stale user JWT.
+        # Restore the anon-key default so other code paths (health checks, etc.)
+        # don't leak one user's token into another request
         if previous_auth is None:
             client.options.headers.pop("Authorization", None)
         else:
