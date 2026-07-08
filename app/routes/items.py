@@ -155,7 +155,12 @@ async def create_item(
         # Filter None values (Supabase doesn't like nulls in dict literals)
         item_data = {k: v for k, v in item_data.items() if v is not None}
 
-        resp = sb.table("items").insert(item_data).execute()
+        # Upsert: if user already saved this URL, re-analyse and update the existing row
+        # instead of failing with 23505 unique constraint violation.
+        resp = sb.table("items").upsert(
+            item_data,
+            on_conflict="user_id,url",  # matches the unique index items_user_url_unique
+        ).execute()
 
         if not resp.data:
             raise HTTPException(
