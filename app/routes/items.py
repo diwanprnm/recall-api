@@ -119,8 +119,20 @@ async def create_item(
 
     # ── Step 3: Store in Supabase ───────────────────────────────────────────
     with supabase_session(auth) as sb:
+        # ── Extract user_id from JWT ───────────────────────────────────────
+        from app.core.jwt import extract_user_id_from_jwt
+
+        token = auth.replace("Bearer ", "", 1) if auth.startswith("Bearer ") else auth
+        user_id = extract_user_id_from_jwt(token)
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token. Please sign in again.",
+            )
+
         # Upsert item
         item_data = {
+            "user_id": user_id,  # ← Inject authenticated user
             "url": url_str,
             "platform": payload.platform.value,
             "original_id": payload.original_id,
