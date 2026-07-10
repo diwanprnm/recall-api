@@ -135,17 +135,23 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
     # ── Middleware ──────────────────────────────────────────────────────────────
     # In development: allow any origin (for mobile testing over LAN)
     # In production: only configured origins
-    if cfg.is_production:
-        cors_origins = cfg.allowed_origins_list
-        cors_origin_regex = None
-    else:
-        cors_origins = cfg.allowed_origins_list  # use comma-separated from ALLOWED_ORIGINS env
-        cors_origin_regex = cfg.allowed_origins.strip()  # allow any configured origin
+    # ── Middleware ──────────────────────────────────────────────────────────────
+    
+    # 1. Ambil raw string dari konfigurasi (jangan pakai regex)
+    raw_origins = getattr(cfg, "allowed_origins", "")
+    
+    # 2. Pecah string berdasarkan koma menjadi List Python yang valid
+    # Hasilnya: ["https://recall.theonezone.my.id", "https://www.recall.theonezone.my.id"]
+    cors_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
+    # 3. Fallback aman jika list ternyata kosong
+    if not cors_origins:
+        logger.warning("CORS origins not parsed correctly. Defaulting to allow all [*]")
+        cors_origins = ["*"]
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
-        allow_origin_regex=cors_origin_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
