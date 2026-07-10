@@ -132,20 +132,18 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
         redoc_url="/redoc" if not cfg.is_production else None,
     )
 
-    # ── Middleware ──────────────────────────────────────────────────────────────
-    # In development: allow any origin (for mobile testing over LAN)
-    # In production: only configured origins
-    if cfg.is_production:
-        cors_origins = cfg.allowed_origins_list
-        cors_origin_regex = None
-    else:
-        cors_origins = cfg.allowed_origins_list  # use comma-separated from ALLOWED_ORIGINS env
-        cors_origin_regex = cfg.allowed_origins.strip()  # allow any configured origin
+   # ── Middleware ──────────────────────────────────────────────────────────────
+    # Ambil list origin dari konfigurasi (pastikan ini mereturn List[str])
+    cors_origins = cfg.allowed_origins_list
+
+    # Jika list kosong, fallback ke wildcard [*] untuk mencegah aplikasi mati total
+    if not cors_origins:
+        logger.warning("CORS origins not set. Defaulting to allow all [*]")
+        cors_origins = ["*"]
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
-        allow_origin_regex=cors_origin_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
