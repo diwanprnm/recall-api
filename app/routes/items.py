@@ -26,9 +26,7 @@ from app.schemas.schemas import (
 )
 
 logger = structlog.get_logger(__name__)
-
-# PERBAIKAN: Prefix dihapus untuk menghindari jebakan 307 Redirect pada CORS Preflight
-router = APIRouter(tags=["items"])
+router = APIRouter(prefix="/items", tags=["items"])
 
 
 # ── Dependency: require auth header ───────────────────────────────────────────
@@ -51,9 +49,8 @@ AuthDep = Annotated[str, Depends(_require_auth)]
 
 # ── POST /items — Save new content (full pipeline) ────────────────────────────
 
-# PERBAIKAN: path diset eksplisit ke "/items"
 @router.post(
-    "/items",
+    "",
     response_model=Item,
     status_code=status.HTTP_201_CREATED,
     summary="Save new content item",
@@ -100,7 +97,6 @@ async def create_item(
             payload.thumbnail_url = payload.thumbnail_url or extracted.get("thumbnail_url")
         except ContentExtractionError:
             logger.warning("Content extraction failed, proceeding with available data", url=url_str)
-            
     # ── Step 2: Run AI pipeline ─────────────────────────────────────────────
     from app.main import get_ai_service
 
@@ -268,9 +264,8 @@ def _get_item_with_relations(sb, item_id: str) -> Item:
 
 # ── GET /items — List items with filters ────────────────────────────────────
 
-# PERBAIKAN: path diset eksplisit ke "/items"
 @router.get(
-    "/items",
+    "",
     response_model=PaginatedResponse,
     summary="List saved items",
 )
@@ -356,9 +351,8 @@ async def list_items(
 
 # ── GET /items/{id} — Get single item ──────────────────────────────────────────
 
-# PERBAIKAN: path diset eksplisit ke "/items/{item_id}"
 @router.get(
-    "/items/{item_id}",
+    "/{item_id}",
     response_model=Item,
     summary="Get a single item",
 )
@@ -369,9 +363,8 @@ async def get_item(auth: AuthDep, item_id: str) -> Item:
 
 # ── PATCH /items/{id} — Update item ───────────────────────────────────────────
 
-# PERBAIKAN: path diset eksplisit ke "/items/{item_id}"
 @router.patch(
-    "/items/{item_id}",
+    "/{item_id}",
     response_model=Item,
     summary="Update an item (partial)",
 )
@@ -409,9 +402,8 @@ async def update_item(
 
 # ── DELETE /items/{id} — Archive or hard-delete ─────────────────────────────
 
-# PERBAIKAN: path diset eksplisit ke "/items/{item_id}"
 @router.delete(
-    "/items/{item_id}",
+    "/{item_id}",
     response_model=ApiResponse,
     summary="Delete (archive) an item",
 )
@@ -434,9 +426,8 @@ async def delete_item(
 
 # ── POST /items/{id}/reanalyse — Re-run AI on existing item ───────────────────
 
-# PERBAIKAN: path diset eksplisit ke "/items/{item_id}/reanalyse"
 @router.post(
-    "/items/{item_id}/reanalyse",
+    "/{item_id}/reanalyse",
     response_model=Item,
     summary="Re-run AI analysis on an existing item",
 )
