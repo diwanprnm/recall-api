@@ -15,6 +15,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.supabase import supabase_session
+from app.core.async_supabase import execute_async, rpc_async
 from app.schemas.schemas import Item, SearchQuery, SearchResponse, SearchResult
 
 logger = structlog.get_logger(__name__)
@@ -87,7 +88,8 @@ async def semantic_search(
     with supabase_session(auth) as sb:
         try:
             # Call the RPC function — returns items with similarity score
-            rpc_result = await sb.rpc(
+            rpc_result = await rpc_async(
+                sb,
                 "match_items",
                 {
                     "query_embedding": query_vector,
@@ -96,7 +98,7 @@ async def semantic_search(
                     "filter_platform": payload.platform.value if payload.platform else None,
                     "filter_tags": payload.tags if payload.tags else None,
                 },
-            ).execute()
+            )
         except Exception as exc:
             logger.error("Supabase RPC search failed", error=str(exc))
             raise HTTPException(
@@ -173,7 +175,9 @@ async def find_related(
     """
     with supabase_session(auth) as sb:
         # Get the existing item's embedding
-        resp = sb.table("items").select("id, embedding, title").eq("id", item_id).execute()
+        resp = await execute_async(
+            sb.table("items").select("id, embedding, title").eq("id", item_id)
+        )
         if not resp.data:
             raise HTTPException(status_code=404, detail="Item not found")
         item = resp.data[0]
@@ -184,12 +188,9 @@ async def find_related(
             )
 
     # Re-use the semantic search with the existing item's vector
-    payload = SearchQuery(query=f"related to: {item.get('title', '')}", limit=limit)
-    payload.query = ""  # signal to skip embedding (we already have it)
-    # Hack: store vector in a temp attribute (simpler than duplicating the search logic)
-    # Instead, just call the RPC directly with the stored vector
     with supabase_session(auth) as sb:
-        rpc_result = await sb.rpc(
+        rpc_result = await rpc_async(
+            sb,
             "match_items",
             {
                 "query_embedding": item["embedding"],
@@ -198,7 +199,7 @@ async def find_related(
                 "filter_platform": None,
                 "filter_tags": None,
             },
-        ).execute()
+        )
 
     results = [
         SearchResult(

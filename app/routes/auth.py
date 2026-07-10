@@ -17,6 +17,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.supabase import supabase_session
+from app.core.async_supabase import execute_async
 from app.schemas.schemas import ApiResponse, UserProfile
 
 logger = structlog.get_logger(__name__)

@@ -166,11 +166,14 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
 
     @app.get("/health/ready", tags=["health"])
     async def readiness_check():
-        """Full readiness: checks Supabase connectivity using sync admin client."""
+        """Full readiness: checks Supabase connectivity using async thread pool."""
         try:
+            import asyncio
             from app.core.supabase import get_supabase_admin
             admin = get_supabase_admin()
-            admin.table("tags").select("id").limit(1).execute()
+            await asyncio.to_thread(
+                admin.table("tags").select("id").limit(1).execute
+            )
             return {"status": "ready", "database": "connected"}
         except Exception as exc:
             logger.error("Readiness check failed", error=str(exc))
@@ -186,6 +189,11 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
     # ── Global exception handlers ──────────────────────────────────────────────
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        logger.warning(
+            "Request validation error",
+            path=request.url.path,
+            errors=exc.errors(),
+        )
         return JSONResponse(
             status_code=422,
             content={
@@ -196,10 +204,35 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
-        logger.error("Unhandled exception", path=request.url.path, error=str(exc), exc_info=True)
+        logger.error(
+            "Unhandled exception",
+            path=request.url.path,
+            error=str(exc),
+            error_type=type(exc).__name__,
+            exc_info=True,
+        )
         return JSONResponse(
             status_code=500,
             content={"detail": "Internal server error. This has been logged."},
+        )
+
+    # ── Catch response serialization errors (Pydantic ValidationError) ─────
+    # These happen when DB returns data that doesn't match the response model,
+    # and they are NOT caught by the generic Exception handler above.
+    from pydantic import ValidationError
+
+    @app.exception_handler(ValidationError)
+    async def pydantic_validation_error_handler(request: Request, exc: ValidationError):
+        logger.error(
+            "Response serialization error — DB returned invalid data",
+            path=request.url.path,
+            method=request.method,
+            errors=exc.errors(),
+            exc_info=True,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error: response data is invalid."},
         )
 
     return app

@@ -11,7 +11,7 @@ import time
 import base64
 import json
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("app.jwt")
 
 
 class JWTError(Exception):
@@ -78,5 +78,5 @@ def extract_user_id_from_jwt(jwt_token: str) -> str | None:
         payload = decode_jwt_payload(jwt_token)
         return payload.get("sub")
     except JWTError as exc:
-        logger.debug("Failed to extract user_id from JWT", error=str(exc))
+        logger.warning("Failed to extract user_id from JWT", error=str(exc))
         return None

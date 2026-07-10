@@ -1,5 +1,5 @@
 """
-Supabase client — single sync instance, lazily created.
+Supabase client — thread-safe, per-request sessions.
 
 Why SYNC, not async?
 - `create_async_client` of the supabase library returns a coroutine from the factory
@@ -10,9 +10,16 @@ Why SYNC, not async?
 Two clients are exported:
   • get_supabase_client()  — anon key, respects RLS (use in route handlers)
   • get_supabase_admin()   — service role key, bypasses RLS (use only for ops)
+
+Thread-safety:
+  Each request gets its own supabase_session() context that creates a CLIENT
+  COPY per-invocation, avoiding race conditions when multiple async requests
+  share the same event loop.
 """
 from __future__ import annotations
 
+import copy
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -23,10 +30,11 @@ from app.core.config import get_settings
 
 logger = structlog.get_logger(__name__)
 
-# ── Module-level singleton (initialised once per uvicorn worker) ────────────────
+# ── Module-level singletons (initialised once per uvicorn worker) ──────────────
 
 _client: Client | None = None
 _admin_client: Client | None = None
+_lock = threading.Lock()
 
 
 def _init_client() -> None:
@@ -60,49 +68,51 @@ def get_supabase_admin() -> Client:
     return _admin_client
 
 
+def _copy_client(base: Client) -> Client:
+    """
+    Create a lightweight copy of a Supabase client for per-request use.
+
+    This avoids mutating the shared singleton's headers, which would cause
+    race conditions under concurrent async requests.
+    """
+    new_client = copy.copy(base)
+    # Ensure the copy has its own mutable headers dict
+    new_client.options = copy.copy(new_client.options)
+    new_client.options.headers = copy.copy(new_client.options.headers)
+    return new_client
+
+
 @contextmanager
 def supabase_session(jwt: str) -> Generator[Client, None, None]:
     """
-    Sync context manager: forward the user's JWT so PostgREST can extract
-    `auth.uid()` for RLS policy evaluation.
+    Per-request context manager: creates a CLIENT COPY with the user's JWT
+    so PostgREST can extract `auth.uid()` for RLS policy evaluation.
 
-    CRITICAL: ``client.auth.set_session()`` only mutates the *auth* client's
-    internal session object. PostgREST REST calls read **HTTP_Authorization**
-    directly from the request header (set via the underlying httpx client).
-
-    Therefore we must mutate ``client.options.headers["Authorization"]`` to
-    the user's JWT so that every subsequent ``.execute()`` call sends the Bearer
-    token. On exit we restore the anon-key default.
+    Each concurrent request gets its own client copy — no shared mutable state.
 
     Usage:
         with supabase_session(request.headers.get("Authorization", "")) as sb:
             items = sb.table("items").select("*").execute()
     """
     _init_client()
-    client = _client  # type: ignore[union-attr]
+    base_client = _client  # type: ignore[union-attr]
 
     token = jwt.replace("Bearer ", "", 1) if jwt.startswith("Bearer ") else jwt
     if not token:
         logger.warning("No JWT token provided to supabase_session — RLS will use anon key")
-        yield client
+        yield base_client
         return
 
-    # Store the original anon-key default
-    previous_auth = client.options.headers.get("Authorization")
-
-    # Override with user JWT so PostgREST sees a real auth.uid()
+    # Create a per-request client copy to avoid race conditions
+    client = _copy_client(base_client)
     client.options.headers["Authorization"] = f"Bearer {token}"
 
     try:
-        logger.debug("Supabase session: using JWT for PostgREST auth")
+        logger.debug("Supabase session: per-request client created with user JWT")
         yield client
     finally:
-        # Restore the anon-key default so other code paths (health checks, etc.)
-        # don't leak one user's token into another request
-        if previous_auth is None:
-            client.options.headers.pop("Authorization", None)
-        else:
-            client.options.headers["Authorization"] = previous_auth
+        # Nothing to restore — this is a per-request copy that will be GC'd
+        pass
 
 
 def close_supabase_clients() -> None:

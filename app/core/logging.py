@@ -47,8 +47,17 @@ def configure_logging() -> None:
         cache_logger_on_first_use=True,
     )
 
+    # Production: use WARNING as root level so DEBUG/INFO from structlog
+    # (which uses stdlib LoggerFactory) still gets through via structlog processors.
+    # For third-party libs, WARNING is appropriate.
+    # For our app code: structlog handles level filtering via its own processors.
+    root_level = logging.DEBUG if cfg.debug else logging.WARNING
+
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
-        level=logging.DEBUG if cfg.debug else logging.INFO,
+        level=root_level,
     )
+
+    # Ensure our app modules log at INFO level even in production
+    logging.getLogger("app").setLevel(logging.INFO)
