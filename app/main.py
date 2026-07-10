@@ -136,18 +136,18 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
    # ── Middleware ──────────────────────────────────────────────────────────────
     
     # Ambil raw string dari konfigurasi
-    raw_origins = getattr(cfg, "allowed_origins", "https://recall.theonezone.my.id")
+    # raw_origins = getattr(cfg, "allowed_origins", "https://recall.theonezone.my.id")
     
-    # Pecah string berdasarkan koma menjadi List
-    cors_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    # # Pecah string berdasarkan koma menjadi List
+    # cors_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
 
-    # Fallback aman
-    if not cors_origins:
-        cors_origins = ["*"]
+    # # Fallback aman
+    # if not cors_origins:
+    #     cors_origins = ["*"]
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins,
+        allow_origins=[*],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
