@@ -2,7 +2,7 @@
 FastAPI application factory and lifecycle management.
 
 Architecture:
-  • App lifecycle (startup/shutdown) initialises Supabase clients and AI services
+  • App lifecycle (startup/shutdown) initialises the DB connection and AI services
   • Services are exposed via get_ai_service() / get_embedding_service() singletons
   • CORS configured per environment
   • Sentry integrated for production error tracking
@@ -21,29 +21,11 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
-from app.core.supabase import close_supabase_clients, get_supabase_client
-from app.routes import auth, items, search
+from app.core.db import close_db, get_conn
+from app.services import container
+from app.routes import auth, items, search, tags, categories, digest
 
 logger = structlog.get_logger()
-
-# ── Global service singletons (initialised on startup) ────────────────────────
-
-_ai_service: "app.services.ai_service.AIService | None" = None
-_embedding_service: "app.services.embedding_service.EmbeddingService | None" = None
-
-
-def get_ai_service():
-    global _ai_service
-    if _ai_service is None:
-        raise RuntimeError("Application not started — call lifespan event first")
-    return _ai_service
-
-
-def get_embedding_service():
-    global _embedding_service
-    if _embedding_service is None:
-        raise RuntimeError("Application not started — call lifespan event first")
-    return _embedding_service
 
 
 # ── Lifespan: startup / shutdown ──────────────────────────────────────────────
@@ -61,24 +43,17 @@ async def lifespan(app: FastAPI):
         debug=cfg.debug,
     )
 
-    # ── Initialise Supabase client ────────────────────────────────────────────
+    # ── Initialise DB connection ──────────────────────────────────────────────
     try:
-        get_supabase_client()
-        logger.info("Supabase client ready", url=cfg.supabase_url)
+        get_conn()
+        logger.info("Database connection ready", url=cfg.database_url)
     except Exception as exc:
-        logger.error("Failed to init Supabase client", error=str(exc))
+        logger.error("Failed to init database connection", error=str(exc))
         raise
 
     # ── Initialise AI services ────────────────────────────────────────────────
-    from app.core.ai import get_async_instructor
-    from app.services.embedding_service import EmbeddingService
-    from app.services.ai_service import AIService
-
-    global _ai_service, _embedding_service
     try:
-        instructor_client = get_async_instructor()
-        _embedding_service = EmbeddingService(instructor_client)
-        _ai_service = AIService(instructor_client, _embedding_service)
+        container.init_services()
         logger.info(
             "AI services initialised",
             model=cfg.ai_model,
@@ -104,7 +79,7 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ────────────────────────────────────────────────────────────────
     logger.info("Shutting down Recall API")
-    await close_supabase_clients()
+    await close_db()
     logger.info("Shutdown complete")
 
 
@@ -132,22 +107,39 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
         redoc_url="/redoc" if not cfg.is_production else None,
     )
 
+    # ── Swagger "Authorize" button: lets you paste a Bearer JWT once,
+    #    applied to every locked endpoint in /docs. ─────────────────────────────
+    app.swagger_ui_init_oauth = None
+
+    from fastapi.openapi.utils import get_openapi
+
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        schema.setdefault("components", {}).setdefault("securitySchemes", {})["BearerAuth"] = {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+        }
+        for path in schema["paths"].values():
+            for op in path.values():
+                if isinstance(op, dict):
+                    op.setdefault("security", [{"BearerAuth": []}])
+        app.openapi_schema = schema
+        return app.openapi_schema
+
+    app.openapi = custom_openapi
+
     # ── Middleware ──────────────────────────────────────────────────────────────
-   # ── Middleware ──────────────────────────────────────────────────────────────
-    
-    # Ambil raw string dari konfigurasi
-    # raw_origins = getattr(cfg, "allowed_origins", "https://recall.theonezone.my.id")
-    
-    # # Pecah string berdasarkan koma menjadi List
-    # cors_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
-
-    # # Fallback aman
-    # if not cors_origins:
-    #     cors_origins = ["*"]
-
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cfg.allowed_origins_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -158,6 +150,9 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
     app.include_router(auth.router, prefix="/api")
     app.include_router(items.router, prefix="/api")
     app.include_router(search.router, prefix="/api")
+    app.include_router(tags.router, prefix="/api")
+    app.include_router(categories.router, prefix="/api")
+    app.include_router(digest.router, prefix="/api")
 
     # ── Health check ────────────────────────────────────────────────────────────
     @app.get("/health", tags=["health"])
@@ -166,14 +161,10 @@ Auth: All endpoints require a Supabase JWT in the `Authorization: Bearer <token>
 
     @app.get("/health/ready", tags=["health"])
     async def readiness_check():
-        """Full readiness: checks Supabase connectivity using async thread pool."""
+        """Full readiness: checks database connectivity."""
         try:
-            import asyncio
-            from app.core.supabase import get_supabase_admin
-            admin = get_supabase_admin()
-            await asyncio.to_thread(
-                admin.table("tags").select("id").limit(1).execute
-            )
+            from app.core.db import db_query
+            await db_query("SELECT 1")
             return {"status": "ready", "database": "connected"}
         except Exception as exc:
             logger.error("Readiness check failed", error=str(exc))

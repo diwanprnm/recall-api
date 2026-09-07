@@ -22,16 +22,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && groupadd -r recall && useradd -r recall -g recall
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    ENVIRONMENT=development
 
+# 1. Install dependencies dulu (layer cache stabil — hanya berubah kalau pyproject.toml berubah)
 COPY pyproject.toml README.md ./
-
-# PERBAIKAN 1 & 2: Gunakan user 'recall' dan sesuaikan struktur folder
-COPY --chown=recall:recall ./app ./app
-
-# Jalankan instalasi setelah semua file siap
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
+
+# 2. Copy source code setelah install (tidak merusak cache layer pip)
+COPY --chown=recall:recall ./app ./app
 
 # Switch to non-root user demi keamanan
 USER recall

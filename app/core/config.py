@@ -22,11 +22,31 @@ class Settings(BaseSettings):
         revalidate_classes=True,
     )
 
-    # ── Supabase ──────────────────────────────────────────────────────────────
-    supabase_url: str = Field(..., description="Supabase project URL")
-    supabase_anon_key: str = Field(..., description="Supabase anon (client-side) key")
-    supabase_service_role_key: str = Field(
-        ..., description="Supabase service role key (server-side only!)"
+    # ── Supabase (legacy / optional — only used if still pointing at cloud) ──
+    supabase_url: str | None = Field(None, description="Supabase project URL (optional)")
+    supabase_anon_key: str | None = Field(None, description="Supabase anon key (optional)")
+    supabase_service_role_key: str | None = Field(
+        None, description="Supabase service role key (optional)"
+    )
+
+    # ── Database (raw Postgres) ────────────────────────────────────────────────
+    database_url: str = Field(
+        "postgresql://recall:recall_dev_secret@postgres:5432/recall",
+        description="Raw Postgres connection string (psycopg)",
+    )
+
+    # ── JWT auth (custom, replaces Supabase Auth) ──────────────────────────────
+    jwt_secret: str = Field(
+        "dev-insecure-change-me",
+        description="HS256 signing secret for issued access tokens",
+    )
+    jwt_algorithm: str = Field("HS256")
+    access_token_expire_minutes: int = Field(60 * 24 * 7)  # 7 days
+
+    # ── Google Sign-In (optional — enables POST /auth/google when set) ─────────
+    google_client_id: str | None = Field(
+        None,
+        description="Google OAuth Client ID (audience claim in Sign-In id_tokens)",
     )
 
     # ── AI / 9router ──────────────────────────────────────────────────────────

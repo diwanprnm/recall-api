@@ -240,6 +240,11 @@ class CategoryCreate(CategoryBase):
     pass
 
 
+class CategoryUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=100)
+    color: str | None = Field(None, pattern="^#[0-9a-fA-F]{6}$")
+
+
 class Category(CategoryBase):
     id: str
     user_id: str
@@ -286,6 +291,31 @@ class DigestSettings(BaseModel):
     last_sent_at: datetime | None = None
 
 
+class DigestSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    frequency: str | None = Field(None, pattern="^(daily|weekly|biweekly)$")
+
+
+class DigestItem(BaseModel):
+    """Single item in a generated digest."""
+    id: str
+    title: str | None = None
+    summary: str | None = None
+    url: str
+    platform: str
+    thumbnail_url: str | None = None
+    saved_at: datetime
+    quality_score: int | None = None
+    days_unread: int = Field(..., description="Days since last read (or since saved)")
+
+
+class DigestResponse(BaseModel):
+    """Generated digest with recommended items to re-read."""
+    items: list[DigestItem]
+    total: int
+    generated_at: datetime
+
+
 # ── Auth / User Schemas ───────────────────────────────────────────────────────
 
 class UserProfile(BaseModel):
@@ -297,11 +327,25 @@ class UserProfile(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    """JWT returned after Supabase Auth sign-in."""
+    """JWT returned after local sign-in/register."""
     access_token: str
-    refresh_token: str
-    expires_in: int
     token_type: str = "Bearer"
+    expires_in: int
+
+
+class AuthRequest(BaseModel):
+    """Email + password for register/login."""
+
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=6, max_length=128)
+
+
+class GoogleAuthRequest(BaseModel):
+    """Google Sign-In id_token from the frontend (Google Identity Services)."""
+
+    credential: str = Field(..., min_length=20)
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=6, max_length=128)
 
 
 # ── Generic API Response Wrappers ─────────────────────────────────────────────

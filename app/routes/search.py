@@ -1,9 +1,9 @@
 """
-Semantic search route — pgvector cosine similarity via Supabase.
+Semantic search route — pgvector cosine similarity (raw Postgres RPC).
 
 Key design decisions:
   1. Query embedding is generated on-the-fly (client sends natural language)
-  2. Uses Supabase RPC function for vector search (avoids raw SQL in app code)
+  2. Uses the `match_items` SQL function (now takes p_user_id, no RLS)
   3. Combines vector similarity + optional metadata filters
   4. Returns top-K results with similarity scores for ranking display
 """
@@ -12,67 +12,66 @@ from __future__ import annotations
 import time
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, status
+from typing import Annotated
 
-from app.core.supabase import supabase_session
-from app.core.async_supabase import execute_async, rpc_async
+from app.core.db import db_query
+from app.routes.deps import AuthDep, get_current_user_id
+from app.services import container
 from app.schemas.schemas import Item, SearchQuery, SearchResponse, SearchResult
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/search", tags=["search"])
 
 
-def _require_auth(request: Request) -> str:
-    auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization header",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return auth
-
-
-AuthDep = Depends(_require_auth)
+def _row_to_search_result(row: dict) -> SearchResult:
+    item = Item(
+        id=row["id"],
+        user_id=row["user_id"],
+        url=row["url"],
+        platform=row["platform"],
+        original_id=row.get("original_id"),
+        title=row.get("title"),
+        text=row.get("text"),
+        author=row.get("author"),
+        author_handle=row.get("author_handle"),
+        author_avatar=row.get("author_avatar"),
+        thumbnail_url=row.get("thumbnail_url"),
+        summary=row.get("summary"),
+        key_points=row.get("key_points"),
+        sentiment=row.get("sentiment"),
+        quality_score=row.get("quality_score"),
+        embedding=None,
+        analysis_json=None,
+        saved_at=row["saved_at"],
+        read_at=row.get("read_at"),
+        is_favorite=row.get("is_favorite", False),
+        is_archived=row.get("is_archived", False),
+        category_id=row.get("category_id"),
+        category_name=row.get("category_name"),
+        tags=row.get("tags", []),
+    )
+    return SearchResult(
+        item=item,
+        similarity=round(row.get("similarity", 0.0), 4),
+        highlight=row.get("highlight") if "highlight" in row else None,
+    )
 
 
 @router.post(
     "",
     response_model=SearchResponse,
     summary="Semantic search — find items by meaning, not keywords",
-    description="""
-    **Semantic search endpoint.**
-
-    Instead of keyword matching, this endpoint:
-    1. Embeds your natural language query using text-embedding-3-small
-    2. Searches Supabase pgvector using cosine similarity
-    3. Returns ranked results with similarity scores
-
-    Example queries:
-    - "things I saved about LLM fine-tuning"
-    - "marketing strategies for B2B SaaS"
-    - "how to set up local development environment"
-
-    Combine with `platform` and `tags` filters for refined results.
-    """,
 )
 async def semantic_search(
     payload: SearchQuery,
-    auth: str = AuthDep,
+    auth: AuthDep,
 ) -> SearchResponse:
-    """
-    Perform semantic search against the user's saved items.
-
-    The query text is embedded and compared against stored item embeddings
-    using cosine similarity. Results are filtered by platform/tags if provided.
-    """
-    from app.main import get_embedding_service
-
+    """Embed the query, then call match_items(p_user_id, ...) for pgvector search."""
     t0 = time.monotonic()
+    user_id = get_current_user_id(auth)
 
-    # ── Step 1: Embed the query ───────────────────────────────────────────────
-    embedding_svc = get_embedding_service()
-
+    embedding_svc = container.get_embedding_service()
     try:
         query_vector = await embedding_svc.embed(payload.query)
     except Exception as exc:
@@ -82,72 +81,28 @@ async def semantic_search(
             detail="Embedding service temporarily unavailable",
         ) from None
 
-    # ── Step 2: pgvector search via Supabase RPC ─────────────────────────────
-    # We use an RPC function for the vector search to keep SQL out of the app.
-    # The RPC `match_items` is defined in migration 002_schemas.sql.
-    with supabase_session(auth) as sb:
-        try:
-            # Call the RPC function — returns items with similarity score
-            rpc_result = await rpc_async(
-                sb,
-                "match_items",
-                {
-                    "query_embedding": query_vector,
-                    "match_threshold": 0.7,         # minimum cosine similarity
-                    "match_count": payload.limit,
-                    "filter_platform": payload.platform.value if payload.platform else None,
-                    "filter_tags": payload.tags if payload.tags else None,
-                },
-            )
-        except Exception as exc:
-            logger.error("Supabase RPC search failed", error=str(exc))
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Search service temporarily unavailable",
-            ) from None
+    try:
+        rows = await db_query(
+            "SELECT * FROM public.match_items(%s, %s, %s, %s, %s, %s)",
+            (
+                user_id,
+                query_vector,
+                0.7,  # match_threshold
+                payload.limit,  # match_count
+                payload.platform.value if payload.platform else None,
+                payload.tags if payload.tags else None,
+            ),
+        )
+    except Exception as exc:
+        logger.error("match_items RPC failed", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Search service temporarily unavailable",
+        ) from None
 
-        # ── Step 3: Build response ───────────────────────────────────────────
-        results: list[SearchResult] = []
-        for row in rpc_result.data:
-            item = Item(
-                id=row["id"],
-                user_id=row["user_id"],
-                url=row["url"],
-                platform=row["platform"],
-                original_id=row.get("original_id"),
-                title=row.get("title"),
-                text=row.get("text"),
-                author=row.get("author"),
-                author_handle=row.get("author_handle"),
-                author_avatar=row.get("author_avatar"),
-                thumbnail_url=row.get("thumbnail_url"),
-                summary=row.get("summary"),
-                key_points=row.get("key_points"),
-                sentiment=row.get("sentiment"),
-                quality_score=row.get("quality_score"),
-                embedding=None,  # don't return embedding in search results
-                analysis_json=None,
-                saved_at=row["saved_at"],
-                read_at=row.get("read_at"),
-                is_favorite=row.get("is_favorite", False),
-                is_archived=row.get("is_archived", False),
-                category_id=row.get("category_id"),
-                category_name=row.get("category_name"),
-                tags=row.get("tags", []),
-            )
-            results.append(SearchResult(
-                item=item,
-                similarity=round(row.get("similarity", 0.0), 4),
-                highlight=row.get("highlight") if "highlight" in row else None,
-            ))
-
+    results = [_row_to_search_result(r) for r in rows]
     took_ms = (time.monotonic() - t0) * 1000
-    logger.info(
-        "Semantic search completed",
-        query=payload.query,
-        results=len(results),
-        took_ms=round(took_ms, 1),
-    )
+    logger.info("Semantic search completed", query=payload.query, results=len(results), took_ms=round(took_ms, 1))
 
     return SearchResponse(
         results=results,
@@ -166,74 +121,32 @@ async def semantic_search(
 )
 async def find_related(
     item_id: str,
-    auth: str = AuthDep,
+    auth: AuthDep,
     limit: int = 5,
 ) -> SearchResponse:
-    """
-    Find items similar to an existing saved item.
-    Useful for "more like this" or knowledge graph traversal.
-    """
-    with supabase_session(auth) as sb:
-        # Get the existing item's embedding
-        resp = await execute_async(
-            sb.table("items").select("id, embedding, title").eq("id", item_id)
-        )
-        if not resp.data:
-            raise HTTPException(status_code=404, detail="Item not found")
-        item = resp.data[0]
-        if not item.get("embedding"):
-            raise HTTPException(
-                status_code=422,
-                detail="This item has no embedding — try re-analysing it first",
-            )
+    """Find items similar to an existing saved item ('more like this')."""
+    user_id = get_current_user_id(auth)
 
-    # Re-use the semantic search with the existing item's vector
-    with supabase_session(auth) as sb:
-        rpc_result = await rpc_async(
-            sb,
-            "match_items",
-            {
-                "query_embedding": item["embedding"],
-                "match_threshold": 0.5,
-                "match_count": limit + 1,  # +1 because result includes the item itself
-                "filter_platform": None,
-                "filter_tags": None,
-            },
+    rows = await db_query(
+        "SELECT id, embedding, title FROM public.items WHERE id = %s AND user_id = %s",
+        (item_id, user_id),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Item not found")
+    item = rows[0]
+    if not item.get("embedding"):
+        raise HTTPException(
+            status_code=422,
+            detail="This item has no embedding — try re-analysing it first",
         )
+
+    rpc_rows = await db_query(
+        "SELECT * FROM public.match_items(%s, %s, %s, %s, %s, %s)",
+        (user_id, item["embedding"], 0.5, limit + 1, None, None),
+    )
 
     results = [
-        SearchResult(
-            item=Item(
-                id=row["id"],
-                user_id=row["user_id"],
-                url=row["url"],
-                platform=row["platform"],
-                original_id=row.get("original_id"),
-                title=row.get("title"),
-                text=row.get("text"),
-                author=row.get("author"),
-                author_handle=row.get("author_handle"),
-                author_avatar=row.get("author_avatar"),
-                thumbnail_url=row.get("thumbnail_url"),
-                summary=row.get("summary"),
-                key_points=row.get("key_points"),
-                sentiment=row.get("sentiment"),
-                quality_score=row.get("quality_score"),
-                embedding=None,
-                analysis_json=None,
-                saved_at=row["saved_at"],
-                read_at=row.get("read_at"),
-                is_favorite=row.get("is_favorite", False),
-                is_archived=row.get("is_archived", False),
-                category_id=row.get("category_id"),
-                category_name=row.get("category_name"),
-                tags=row.get("tags", []),
-            ),
-            similarity=round(row.get("similarity", 0.0), 4),
-            highlight=None,
-        )
-        for row in rpc_result.data
-        if row["id"] != item_id  # exclude the source item itself
+        _row_to_search_result(r) for r in rpc_rows if r["id"] != item_id
     ][:limit]
 
     return SearchResponse(

@@ -1,41 +1,100 @@
 """
-Auth routes — Supabase Auth integration helpers.
+Auth routes — local email/password auth (replaces Supabase Auth).
 
 Design:
-  • We don't manage auth tokens ourselves — Supabase handles JWT issuance
-  • These routes help the frontend:
-      - POST /auth/verify  → validate a Supabase JWT and return user profile
-      - GET  /auth/profile → get current user profile from Supabase
-  • The frontend stores the Supabase JWT and sends it as Bearer token in all
-    subsequent requests to the FastAPI backend
+  • We issue our own HS256 JWTs (app.core.security). The frontend stores the
+    token and sends it as `Authorization: Bearer <jwt>` on every request.
+  • Passwords are bcrypt-hashed in the `users.password_hash` column.
+  • User isolation is app-enforced: routes read `user_id` from the verified JWT.
 """
 from __future__ import annotations
 
-from typing import Annotated
-
+import jwt as pyjwt
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, status
+from jwt import PyJWKClient
 
-from app.core.supabase import supabase_session
-from app.core.async_supabase import execute_async
-from app.schemas.schemas import ApiResponse, UserProfile
+from app.core.config import get_settings
+from app.core.db import db_query, db_write
+from app.core.security import (
+    create_access_token,
+    get_user_id_from_token,
+    hash_password,
+    verify_password,
+)
+from app.routes.deps import AuthDep, get_current_user_id
+from app.schemas.schemas import (
+    ApiResponse,
+    AuthRequest,
+    GoogleAuthRequest,
+    TokenResponse,
+    UserProfile,
+)
+
+logger = structlog.get_logger(__name__)
+
+# Google rotates its signing keys; PyJWKClient caches and refreshes on unknown kid.
+_jwk_client = PyJWKClient("https://www.googleapis.com/oauth2/v3/certs")
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _require_auth(request: Request) -> str:
-    auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization header",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return auth
+@router.post(
+    "/register",
+    response_model=TokenResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create account + return JWT",
+)
+async def register(payload: AuthRequest) -> TokenResponse:
+    email = payload.email.strip().lower()
+    existing = await db_query(
+        "SELECT id FROM public.users WHERE email = %s", (email,)
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    user_id = await db_query(
+        """
+        INSERT INTO public.users (email, password_hash)
+        VALUES (%s, %s)
+        RETURNING id
+        """,
+        (email, hash_password(payload.password)),
+    )
+    uid = user_id[0]["id"]
+
+    # Default digest settings
+    await db_write(
+        "INSERT INTO public.digest_settings (user_id) VALUES (%s) "
+        "ON CONFLICT (user_id) DO NOTHING",
+        (uid,),
+    )
+
+    return TokenResponse(
+        access_token=create_access_token(uid),
+        expires_in=60 * 24 * 7 * 60,
+    )
 
 
-AuthDep = Annotated[str, Depends(_require_auth)]
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    summary="Sign in with email + password",
+)
+async def login(payload: AuthRequest) -> TokenResponse:
+    rows = await db_query(
+        "SELECT id, password_hash FROM public.users WHERE email = %s",
+        (payload.email.strip().lower(),),
+    )
+    if not rows or not verify_password(payload.password, rows[0]["password_hash"] or ""):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    return TokenResponse(
+        access_token=create_access_token(rows[0]["id"]),
+        expires_in=60 * 24 * 7 * 60,
+    )
+    
 
 
 @router.get(
@@ -44,36 +103,21 @@ AuthDep = Annotated[str, Depends(_require_auth)]
     summary="Get current authenticated user profile",
 )
 async def get_profile(auth: AuthDep) -> UserProfile:
-    """
-    Validates the JWT and returns the user's profile from Supabase Auth.
-
-    The JWT is issued by Supabase after email/password or OAuth sign-in.
-    We verify it server-side using Supabase's built-in JWT verification.
-    """
-    with supabase_session(auth) as sb:
-        try:
-            user = await sb.auth.get_user()
-        except Exception as exc:
-            logger.warning("JWT verification failed", error=str(exc))
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token",
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from exc
-
-        if not user or not user.user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found",
-            )
-
-        return UserProfile(
-            id=user.user.id,
-            email=user.user.email or "",
-            name=getattr(user.user, "user_metadata", {}).get("full_name"),
-            avatar_url=getattr(user.user, "user_metadata", {}).get("avatar_url"),
-            created_at=user.user.created_at,
-        )
+    uid = get_current_user_id(auth)
+    rows = await db_query(
+        "SELECT id, email, name, avatar_url, created_at FROM public.users WHERE id = %s",
+        (uid,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="User not found")
+    u = rows[0]
+    return UserProfile(
+        id=str(u["id"]),
+        email=u["email"] or "",
+        name=u.get("name"),
+        avatar_url=u.get("avatar_url"),
+        created_at=u["created_at"],
+    )
 
 
 @router.post(
@@ -82,37 +126,8 @@ async def get_profile(auth: AuthDep) -> UserProfile:
     summary="Verify JWT validity",
 )
 async def verify_token(auth: AuthDep) -> ApiResponse:
-    """
-    Lightweight health-check endpoint — just confirms the JWT is valid.
-    Useful for the frontend to verify a stored session is still good.
-    """
-    with supabase_session(auth) as sb:
-        try:
-            await sb.auth.get_user()
-        except Exception:
-            raise HTTPException(status_code=401, detail="Token invalid or expired") from None
+    """Lightweight check that the JWT is valid + not expired."""
+    token = auth.replace("Bearer ", "", 1)
+    if not get_user_id_from_token(token):
+        raise HTTPException(status_code=401, detail="Token invalid or expired")
     return ApiResponse(success=True, message="Token is valid")
-
-
-# ── Supabase Auth webhook handler (for email confirmation, etc.) ───────────────
-
-@router.post(
-    "/webhook",
-    summary="Supabase Auth webhook receiver",
-    description="Handles Supabase Auth events (email confirm, password reset, etc.)",
-)
-async def auth_webhook(request: Request) -> ApiResponse:
-    """
-    Receives Supabase Auth webhook events.
-
-    Supabase sends POST requests to this endpoint on auth events.
-    Configure the webhook URL in Supabase → Authentication → Webhooks.
-
-    For now, this is a no-op placeholder. Implement specific handlers as needed:
-      - user.confirmed → create UserProfile in our extensions table
-      - user.deleted   → cascade delete user's data (GDPR)
-    """
-    body = await request.json()
-    event_type = body.get("type", "unknown")
-    logger.info("Auth webhook received", event=event_type)
-    return ApiResponse(success=True, message=f"Webhook processed: {event_type}")

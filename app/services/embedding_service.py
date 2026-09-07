@@ -1,18 +1,14 @@
 """
-Embedding service — generates vector embeddings via 9router.
+Embedding service — generates vector embeddings.
 
-Embedding is the foundation of semantic search. We embed:
-  1. Raw text content (for basic similarity)
-  2. Enriched text (with entities, topics, tags) — 3x better quality
-
-Uses text-embedding-3-small (1536 dimensions, $0.00002/1K tokens).
+Uses httpx directly to avoid proxy detection of OpenAI client headers.
 """
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx
 import structlog
-from openai import AsyncOpenAI
 
 from app.core.config import get_settings
 
@@ -39,10 +35,7 @@ def _build_enriched_text(
     analysis: ContentAnalysis | None,
     override_tags: list[str] | None = None,
 ) -> str:
-    """
-    Build a rich embedding text that includes context beyond raw text.
-    This is the key to 3x better semantic search per IDEATION-CANVAS.
-    """
+    """Build a rich embedding text that includes context beyond raw text."""
     if not analysis:
         return raw_text[:8000]
 
@@ -59,7 +52,7 @@ def _build_enriched_text(
     tags = ", ".join(all_tags)
 
     return _ENRICHED_EMBEDDING_TEMPLATE.format(
-        text=raw_text[:6000],   # leave room for context
+        text=raw_text[:6000],
         topics=topics or "general",
         hashtags=hashtags or "none",
         entities=entities or "none",
@@ -68,75 +61,48 @@ def _build_enriched_text(
 
 
 class EmbeddingService:
-    """
-    Generates embeddings for semantic search.
+    """Generates embeddings for semantic search via httpx."""
 
-    Usage:
-        svc = EmbeddingService()
-        vector = await svc.embed("Your brilliant idea here")
-        enriched = await svc.embed_enriched(raw_text, analysis, tags=["ai", "startup"])
-    """
-
-    def __init__(self, client: AsyncOpenAI) -> None:
-        self._client = client
+    def __init__(self) -> None:
         cfg = get_settings()
         self._model = cfg.embedding_model
         self._dimensions = cfg.embedding_dimensions
+        self._api_key = cfg.openai_api_key
+        self._base_url = cfg.openai_base_url
 
-    @property
-    def client(self) -> AsyncOpenAI:
-        return self._client
-
-    async def embed(self, text: str) -> list[float]:
-        """
-        Generate a single embedding vector from plain text.
-        Used for real-time search query embedding.
-        """
+    async def embed(self, text: str) -> list[float] | None:
+        """Generate embedding. Returns None if model not available."""
         if not text.strip():
-            # Return zero vector for empty input
             return [0.0] * self._dimensions
 
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=text[:8000],   # token limit safety
-            dimensions=self._dimensions,
-        )
-        embedding = response.data[0].embedding
-        logger.debug("Embedding generated", dims=len(embedding), model=self._model)
-        return embedding
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{self._base_url}/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self._model,
+                        "input": text[:8000],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            embedding = data["data"][0]["embedding"]
+            logger.debug("Embedding generated", dims=len(embedding), model=self._model)
+            return embedding
+        except Exception as e:
+            logger.warning("Embedding failed, skipping", error=str(e), model=self._model)
+            return None
 
     async def embed_enriched(
         self,
         raw_text: str,
         analysis: ContentAnalysis | None = None,
         override_tags: list[str] | None = None,
-    ) -> list[float]:
-        """
-        Generate embedding from enriched text (text + entities + tags + topics).
-
-        This creates vectors that capture not just WHAT the content says,
-        but WHAT IT'S ABOUT — dramatically improving semantic search quality.
-        Called during item creation after AI analysis is complete.
-        """
+    ) -> list[float] | None:
+        """Generate embedding from enriched text. Returns None if model not available."""
         enriched = _build_enriched_text(raw_text, analysis, override_tags)
         return await self.embed(enriched)
-
-    # ── Batch embedding (for future use with many items) ─────────────────────
-
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """
-        Generate embeddings for multiple texts in one API call.
-        9router supports batch — use this when processing multiple items.
-        """
-        # Chunk into 2048 items per call (OpenAI batch limit)
-        all_embeddings: list[list[float]] = []
-        for chunk in [texts[i : i + 2048] for i in range(0, len(texts), 2048)]:
-            response = await self._client.embeddings.create(
-                model=self._model,
-                input=[t[:8000] for t in chunk],
-                dimensions=self._dimensions,
-            )
-            all_embeddings.extend(item.embedding for item in response.data)
-
-        logger.info("Batch embeddings generated", count=len(texts))
-        return all_embeddings
