@@ -11,9 +11,9 @@ from __future__ import annotations
 import structlog
 from fastapi import APIRouter, HTTPException, status
 
-from app.core.db import db_query, db_write
+from app.core.db import db_query
 from app.routes.deps import AuthDep, get_current_user_id
-from app.schemas.schemas import Tag, TagCreate, ApiResponse
+from app.schemas.schemas import Tag, TagCreate
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/tags", tags=["tags"])

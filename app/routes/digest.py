@@ -8,7 +8,7 @@ Flow:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, HTTPException, Query
@@ -16,10 +16,10 @@ from fastapi import APIRouter, HTTPException, Query
 from app.core.db import db_query, db_write
 from app.routes.deps import AuthDep, get_current_user_id
 from app.schemas.schemas import (
-    DigestSettings,
-    DigestSettingsUpdate,
     DigestItem,
     DigestResponse,
+    DigestSettings,
+    DigestSettingsUpdate,
 )
 
 logger = structlog.get_logger(__name__)
@@ -125,5 +125,5 @@ async def generate_digest(
     return DigestResponse(
         items=items,
         total=len(items),
-        generated_at=datetime.now(timezone.utc),
+        generated_at=datetime.now(UTC),
     )

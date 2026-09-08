@@ -13,12 +13,11 @@ import time
 
 import structlog
 from fastapi import APIRouter, HTTPException, status
-from typing import Annotated
 
 from app.core.db import db_query
 from app.routes.deps import AuthDep, get_current_user_id
-from app.services import container
 from app.schemas.schemas import Item, SearchQuery, SearchResponse, SearchResult
+from app.services import container
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/search", tags=["search"])

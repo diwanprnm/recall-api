@@ -11,7 +11,7 @@ Design:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -20,7 +20,6 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from app.core.db import db_query, db_write
 from app.routes.deps import AuthDep, get_current_user_id
-from app.services import container
 from app.schemas.schemas import (
     ApiResponse,
     Item,
@@ -28,6 +27,7 @@ from app.schemas.schemas import (
     ItemUpdate,
     PaginatedResponse,
 )
+from app.services import container
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/items", tags=["items"])
@@ -214,7 +214,7 @@ async def create_item(
         logger.error("AI analysis failed, saving item without enrichment", url=url_str)
 
     # ── Step 3: Store in Postgres ───────────────────────────────────────────
-    insert_sql = f"""
+    insert_sql = """
         INSERT INTO public.items
             (user_id, url, platform, original_id, title, text, author, author_handle,
              author_avatar, thumbnail_url, saved_at, embedding, analysis_json, summary,
@@ -228,7 +228,7 @@ async def create_item(
                 updated_at = now()
         RETURNING id
     """
-    saved_at = datetime.now(timezone.utc).isoformat()
+    saved_at = datetime.now(UTC).isoformat()
     rows = await db_query(
         insert_sql,
         (
@@ -321,7 +321,7 @@ async def create_item_quick(
             SET title = EXCLUDED.title, text = EXCLUDED.text, updated_at = now()
         RETURNING id
     """
-    saved_at = datetime.now(timezone.utc).isoformat()
+    saved_at = datetime.now(UTC).isoformat()
     rows = await db_query(
         insert_sql,
         (
@@ -578,8 +578,8 @@ async def delete_item(
 )
 async def reanalyse_item(item_id: str, auth: AuthDep) -> Item:
     """Re-runs the full AI pipeline and updates the item in place."""
-    from app.services.ai_service import AnalysisError
     from app.services import container
+    from app.services.ai_service import AnalysisError
 
     user_id = get_current_user_id(auth)
     rows = await db_query(

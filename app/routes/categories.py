@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.core.db import db_query, db_write
 from app.routes.deps import AuthDep, get_current_user_id
-from app.schemas.schemas import Category, CategoryCreate, CategoryUpdate, ApiResponse
+from app.schemas.schemas import ApiResponse, Category, CategoryCreate, CategoryUpdate
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/categories", tags=["categories"])

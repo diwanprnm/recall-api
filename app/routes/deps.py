@@ -9,9 +9,9 @@ Auth is now a custom HS256 JWT (see app.core.security). The token is verified
 """
 from __future__ import annotations
 
-import jwt as pyjwt
 from typing import Annotated
 
+import jwt as pyjwt
 from fastapi import Depends, HTTPException, Request, status
 
 from app.core.security import decode_token

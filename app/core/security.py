@@ -8,10 +8,7 @@ the secret now, so verification is mandatory).
 """
 from __future__ import annotations
 
-import base64
-import json
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import jwt as pyjwt
 from passlib.context import CryptContext
@@ -41,7 +38,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def create_access_token(user_id: str) -> str:
     cfg = get_settings()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
         "iat": int(now.timestamp()),

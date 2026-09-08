@@ -10,20 +10,20 @@ Architecture:
 """
 from __future__ import annotations
 
-import structlog
-import uvicorn
 from contextlib import asynccontextmanager
 
+import structlog
+import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
-from app.core.logging import configure_logging
 from app.core.db import close_db, get_conn
+from app.core.logging import configure_logging
+from app.routes import auth, categories, digest, items, search, tags
 from app.services import container
-from app.routes import auth, items, search, tags, categories, digest
 
 logger = structlog.get_logger()
 

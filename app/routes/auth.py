@@ -9,12 +9,10 @@ Design:
 """
 from __future__ import annotations
 
-import jwt as pyjwt
 import structlog
 from fastapi import APIRouter, HTTPException, status
 from jwt import PyJWKClient
 
-from app.core.config import get_settings
 from app.core.db import db_query, db_write
 from app.core.security import (
     create_access_token,
@@ -26,7 +24,6 @@ from app.routes.deps import AuthDep, get_current_user_id
 from app.schemas.schemas import (
     ApiResponse,
     AuthRequest,
-    GoogleAuthRequest,
     TokenResponse,
     UserProfile,
 )
@@ -94,7 +91,7 @@ async def login(payload: AuthRequest) -> TokenResponse:
         access_token=create_access_token(rows[0]["id"]),
         expires_in=60 * 24 * 7 * 60,
     )
-    
+
 
 
 @router.get(
