@@ -47,6 +47,10 @@ IG_LOGINWALL_HTML = """
 </head><body>Login and sign up to see photos and videos from your friends.</body></html>
 """
 
+IG_JS_SHELL_HTML = """
+<html><head><title>Instagram</title></head><body>instagram</body></html>
+"""
+
 
 # ── Reddit ────────────────────────────────────────────────────────────────────
 
@@ -94,6 +98,9 @@ class TestInstagram:
 
     def test_login_wall_on_empty(self):
         assert _is_instagram_login_wall("") is True
+
+    def test_js_only_shell_detected(self):
+        assert _is_instagram_login_wall(IG_JS_SHELL_HTML) is True
 
 
 # ── Fallback title derivation ─────────────────────────────────────────────────

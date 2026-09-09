@@ -181,7 +181,7 @@ _LOGIN_WALL_MARKERS = ("log in", "login", "sign up to see", "see posts and video
 
 
 def _is_instagram_login_wall(html: str) -> bool:
-    """Detect Instagram's logged-out login-wall page."""
+    """Detect Instagram's logged-out login-wall page or JS-only app shell."""
     if not html:
         return True
     soup = BeautifulSoup(html, "html.parser")
@@ -189,11 +189,14 @@ def _is_instagram_login_wall(html: str) -> bool:
     body = soup.get_text(separator=" ", strip=True).lower()[:2000]
     if "instagram" in title and any(m in title for m in ("login", "log in")):
         return True
+    # JS-only shell: title is bare "Instagram" and body carries no real content
+    if title.strip() == "instagram" and len(body) < 100:
+        return True
     return "login and sign up" in body or ("log in" in body and "sign up" in body)
 
 
 def _strip_instagram_login_wall(url: str, result: ExtractedContent) -> ExtractedContent:
-    """Drop og-derived garbage when Instagram served its login-wall."""
+    """Drop og-derived garbage when Instagram served its login-wall/app shell."""
     handle = _handle_from_url(url)
     if handle and (not result.get("title") or result.get("title", "").lower() == "instagram"):
         result["title"] = None  # force fallback derivation
