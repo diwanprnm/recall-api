@@ -111,6 +111,15 @@ class TestInstagramOembed:
         assert out["title"] is None
 
 
+class TestTikTokPhotoUrls:
+    def test_photo_url_rewrites_to_video_for_oembed(self):
+        # oEmbed rejects /photo/ links (400); same ID under /video/ resolves.
+        # The rewrite lives in _extract_structured (network call); assert the
+        # rewrite rule itself so the contract is pinned.
+        photo = "https://www.tiktok.com/@liffnpc/photo/7615995596096163090"
+        assert photo.replace("/photo/", "/video/").endswith("/video/7615995596096163090")
+
+
 class TestInstagram:
     def test_og_html_accepted_when_not_login_wall(self):
         out = _is_instagram_login_wall(IG_OG_HTML)

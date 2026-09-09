@@ -108,9 +108,11 @@ async def _extract_structured(url: str, platform: Platform) -> dict | None:
                 resp.raise_for_status()
                 parsed = _parse_reddit_json(resp.text)
             elif platform == Platform.TIKTOK:
+                # oEmbed rejects /photo/ URLs (400); same ID under /video/ resolves fine
+                oembed_url = url.replace("/photo/", "/video/")
                 resp = await client.get(
                     "https://www.tiktok.com/oembed",
-                    params={"url": url},
+                    params={"url": oembed_url},
                     headers={"User-Agent": "RecallBot/1.0"},
                 )
                 resp.raise_for_status()
