@@ -9,6 +9,7 @@ from app.schemas.schemas import Platform
 from app.services.extraction_service import (
     _fallback_title,
     _is_instagram_login_wall,
+    _parse_instagram_oembed,
     _parse_reddit_json,
     _parse_tiktok_oembed,
 )
@@ -32,6 +33,14 @@ TIKTOK_OEMBED = json.dumps({
     "thumbnail_url": "https://p16-sign.tiktokcdn.com/x.jpg",
     "author_name": "Creator Name",
     "author_unique_id": "creatorhandle",
+})
+
+IG_OEMBED = json.dumps({
+    "title": "Post caption text here",
+    "thumbnail_url": "https://instagram.fbdo9-1.fna.fbcdn.net/img.jpg",
+    "author_name": "Dicoding",
+    "author_url": "https://www.instagram.com/dicoding/",
+    "author_id": "5741463441",
 })
 
 IG_OG_HTML = """
@@ -87,6 +96,20 @@ class TestTikTok:
 
 
 # ── Instagram ─────────────────────────────────────────────────────────────────
+
+class TestInstagramOembed:
+    def test_parses_oembed_fields(self):
+        out = _parse_instagram_oembed(IG_OEMBED)
+        assert out["title"] == "Post caption text here"
+        assert out["thumbnail_url"] == "https://instagram.fbdo9-1.fna.fbcdn.net/img.jpg"
+        assert out["author"] == "Dicoding"
+        assert out["author_handle"] == "dicoding"
+        assert out["original_id"] == "5741463441"
+
+    def test_malformed_json_degrades(self):
+        out = _parse_instagram_oembed("<!DOCTYPE html>")
+        assert out["title"] is None
+
 
 class TestInstagram:
     def test_og_html_accepted_when_not_login_wall(self):

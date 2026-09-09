@@ -69,7 +69,7 @@ async def extract_content(url: str) -> ExtractedContent:
     platform = Platform.from_url(url)
 
     # Platform-specific structured sources first (each swallows its own errors)
-    if platform in (Platform.REDDIT, Platform.TIKTOK):
+    if platform in (Platform.REDDIT, Platform.TIKTOK, Platform.INSTAGRAM):
         structured = await _extract_structured(url, platform)
         if structured is not None:
             # Fill remaining fields from the generic HTML pass for text etc.
@@ -107,7 +107,7 @@ async def _extract_structured(url: str, platform: Platform) -> dict | None:
                 resp = await client.get(json_url, headers={"User-Agent": "RecallBot/1.0"})
                 resp.raise_for_status()
                 parsed = _parse_reddit_json(resp.text)
-            else:  # TIKTOK
+            elif platform == Platform.TIKTOK:
                 resp = await client.get(
                     "https://www.tiktok.com/oembed",
                     params={"url": url},
@@ -115,6 +115,20 @@ async def _extract_structured(url: str, platform: Platform) -> dict | None:
                 )
                 resp.raise_for_status()
                 parsed = _parse_tiktok_oembed(resp.text)
+            else:  # INSTAGRAM — undocumented web oEmbed, no token needed
+                resp = await client.get(
+                    "https://www.instagram.com/api/v1/oembed/",
+                    params={"url": url},
+                    headers={
+                        "User-Agent": (
+                            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+                        ),
+                        "x-ig-app-id": "936619743392459",
+                    },
+                )
+                resp.raise_for_status()
+                parsed = _parse_instagram_oembed(resp.text)
             return {k: v for k, v in parsed.items() if v} or None
     except Exception as exc:
         logger.warning("Structured extraction failed", platform=platform.value, error=str(exc), url=url)
@@ -170,7 +184,35 @@ def _parse_tiktok_oembed(raw: str) -> ExtractedContent:
         author_avatar=None,
         thumbnail_url=data.get("thumbnail_url"),
         platform=Platform.TIKTOK,
-        original_id=None,
+        original_id=data.get("embed_product_id"),
+        description=None,
+        language=None,
+        published_at=None,
+    )
+
+
+def _parse_instagram_oembed(raw: str) -> ExtractedContent:
+    """Parse Instagram's undocumented web oEmbed response (no token needed)."""
+    empty: ExtractedContent = ExtractedContent(
+        title=None, text=None, author=None, author_handle=None, author_avatar=None,
+        thumbnail_url=None, platform=Platform.INSTAGRAM, original_id=None,
+        description=None, language=None, published_at=None,
+    )
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return empty
+    author_url = data.get("author_url") or ""
+    handle = author_url.rstrip("/").split("/")[-1] if author_url else None
+    return ExtractedContent(
+        title=data.get("title"),
+        text=None,
+        author=data.get("author_name"),
+        author_handle=handle,
+        author_avatar=None,
+        thumbnail_url=data.get("thumbnail_url"),
+        platform=Platform.INSTAGRAM,
+        original_id=data.get("author_id"),
         description=None,
         language=None,
         published_at=None,
